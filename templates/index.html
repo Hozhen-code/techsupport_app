@@ -1,15 +1,188 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>기술지원 전산처리시스템</h1>
-<p>좌측 메뉴에서 현장관리보고서/일정관리 기능을 사용하세요.</p>
-<div class="grid">
-  <a class="card" href="/reports">
-    <h3>현장관리보고서</h3>
-    <p>CS 내역을 등록/수정/검색하고 CSV로 내보내기</p>
-  </a>
-  <a class="card" href="/schedule">
-    <h3>일정관리</h3>
-    <p>현장 일정 등록/수정/검색</p>
-  </a>
+<h1>달력</h1>
+
+<div class="calendar-page">
+  <!-- 왼쪽: 달력 -->
+  <section class="calendar-wrap">
+    <div class="calendar-controls">
+      <button id="prevMonth" class="btn">&larr;</button>
+      <div id="monthLabel" class="month-label"></div>
+      <button id="nextMonth" class="btn">&rarr;</button>
+
+      <div class="calendar-filters">
+        <select id="managerFilter">
+          <option value="">담당자(전체)</option>
+          {% for m in MANAGERS %}<option value="{{m}}">{{m}}</option>{% endfor %}
+        </select>
+        <input id="qFilter" type="text" placeholder="일정/현장/메모 검색" />
+        <button id="applyFilter" class="btn">적용</button>
+        <a class="btn primary" href="/schedule/new">+ 새 일정</a>
+      </div>
+    </div>
+
+    <div id="calendar" class="calendar-grid"></div>
+
+    <!-- 색상 범례 -->
+    <div class="legend">
+      {% for m in MANAGERS %}
+      <span class="legend-item">
+        <span class="dot mgr-{{ loop.index0 % 12 }}"></span>{{ m }}
+      </span>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- 오른쪽: 일정 패널(간단 링크/검색) -->
+  <aside class="right-panel">
+    <h2>일정검색</h2>
+    <form class="panel-filter" action="/schedule" method="get">
+      <input type="date" name="fdate" placeholder="연도-월-일" />
+      <input type="date" name="tdate" placeholder="연도-월-일" />
+      <select name="manager">
+        <option value="">담당자(전체)</option>
+        {% for m in MANAGERS %}<option value="{{m}}">{{m}}</option>{% endfor %}
+      </select>
+      <input type="text" name="q" placeholder="일정/현장/메모 검색" />
+      <button class="btn">검색</button>
+      <a class="btn primary" href="/schedule/new">+ 새 일정</a>
+    </form>
+
+    <div class="panel-tip">
+      달력의 <b>색 점</b>에 마우스를 올리면 상세 정보(시간·일정명·현장·담당자)가 보이고,
+      클릭하면 해당 일정 <b>수정</b> 화면으로 이동합니다.
+    </div>
+  </aside>
 </div>
+
+<script>
+(function(){
+  // ---- 요소
+  const calEl = document.getElementById('calendar');
+  const labelEl = document.getElementById('monthLabel');
+  const prevBtn = document.getElementById('prevMonth');
+  const nextBtn = document.getElementById('nextMonth');
+  const applyBtn = document.getElementById('applyFilter');
+  const managerEl = document.getElementById('managerFilter');
+  const qEl = document.getElementById('qFilter');
+
+  // ---- 담당자 목록(색상 매핑)
+  const MANAGERS = {{ (MANAGERS or []) | tojson | safe }};
+
+  // ---- 날짜 유틸
+  let viewYear, viewMonth; // month: 0~11
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function ymd(y,m,d){ return `${y}-${pad(m)}-${pad(d)}`; }
+  function lastDay(y,m){ return new Date(y, m, 0).getDate(); } // m: 1~12
+  function setToThisMonth(date=new Date()){ viewYear=date.getFullYear(); viewMonth=date.getMonth(); }
+  function renderLabel(){ labelEl.textContent = `${viewYear}년 ${viewMonth+1}월`; }
+  function firstOfGrid(){
+    const first = new Date(viewYear, viewMonth, 1);
+    const weekday = first.getDay();
+    return new Date(viewYear, viewMonth, 1 - weekday);
+  }
+
+  // ---- API
+  async function fetchEvents(){
+    const from = ymd(viewYear, viewMonth+1, 1);
+    const to = ymd(viewYear, viewMonth+1, lastDay(viewYear, viewMonth+1));
+    const params = new URLSearchParams();
+    params.set('fdate', from); params.set('tdate', to);
+    if (managerEl.value) params.set('manager', managerEl.value);
+    if (qEl.value) params.set('q', qEl.value);
+    const res = await fetch(`/api/schedule?${params.toString()}`);
+    if (!res.ok) throw new Error('일정 로드 실패');
+    return await res.json();
+  }
+
+  function groupByDate(items){
+    const map = {};
+    for(const it of items){ (map[it.date] = map[it.date] || []).push(it); }
+    return map;
+  }
+
+  function mgrClass(manager){
+    const idx = MANAGERS.indexOf(manager);
+    return `mgr-${(idx >= 0 ? idx : 0) % 12}`;
+  }
+
+  // ---- 달력 렌더 (텍스트 제거, 점만 표시)
+  function renderGrid(eventsByDate){
+    calEl.innerHTML = '';
+
+    // 요일 헤더
+    const header = document.createElement('div');
+    header.className = 'calendar-row header';
+    ['일','월','화','수','목','금','토'].forEach(d=>{
+      const c = document.createElement('div');
+      c.className = 'cell head';
+      c.textContent = d;
+      header.appendChild(c);
+    });
+    calEl.appendChild(header);
+
+    // 6주
+    let cur = firstOfGrid();
+    for(let w=0; w<6; w++){
+      const row = document.createElement('div');
+      row.className = 'calendar-row';
+      for(let d=0; d<7; d++){
+        const cell = document.createElement('div');
+        cell.className = 'cell day';
+
+        const y = cur.getFullYear(), m = cur.getMonth(), dy = cur.getDate();
+        const iso = ymd(y, m+1, dy);
+
+        if (m !== viewMonth) cell.classList.add('muted');
+        if (new Date().toDateString() === cur.toDateString()) cell.classList.add('today');
+
+        const top = document.createElement('div');
+        top.className = 'daynum';
+        top.textContent = dy;
+        cell.appendChild(top);
+
+        const dots = document.createElement('div');
+        dots.className = 'event-dots';
+
+        const events = (eventsByDate[iso] || []);
+        // 각 일정은 '색 점' 하나로만 표시 (툴팁 + 클릭 이동)
+        events.forEach(ev=>{
+          const a = document.createElement('a');
+          a.href = `/schedule/edit/${ev.id}`;
+          a.className = `dot ${mgrClass(ev.manager)}`;
+          a.title = `${ev.date} ${ev.start_time?`[${ev.start_time}] `:''}${ev.title}${ev.site?` @${ev.site}`:''} (${ev.manager})`;
+          dots.appendChild(a);
+        });
+
+        // 너무 많으면 +N
+        if (events.length > 12){
+          const more = document.createElement('span');
+          more.className = 'more-count';
+          more.textContent = `+${events.length-12}`;
+          dots.appendChild(more);
+        }
+
+        cell.appendChild(dots);
+        row.appendChild(cell);
+        cur.setDate(cur.getDate()+1);
+      }
+      calEl.appendChild(row);
+    }
+  }
+
+  async function renderCalendar(){
+    renderLabel();
+    const events = await fetchEvents();
+    renderGrid(groupByDate(events));
+  }
+
+  // 이벤트 바인딩
+  setToThisMonth();
+  prevBtn.addEventListener('click', ()=>{ viewMonth===0 ? (viewMonth=11,viewYear--) : viewMonth--; renderCalendar(); });
+  nextBtn.addEventListener('click', ()=>{ viewMonth===11 ? (viewMonth=0,viewYear++) : viewMonth++; renderCalendar(); });
+  applyBtn.addEventListener('click', renderCalendar);
+
+  renderCalendar();
+})();
+</script>
 {% endblock %}

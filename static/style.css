@@ -1,19 +1,252 @@
-*{box-sizing:border-box}body{font-family:"Pretendard",system-ui,AppleSDGothicNeo,"Noto Sans KR",sans-serif;margin:0;background:#f7f7fb;color:#222}
-.nav{display:flex;gap:16px;padding:14px 20px;background:#0f172a}
-.nav a{color:#fff;text-decoration:none;font-weight:600}
-.container{padding:20px;max-width:1100px;margin:0 auto}
-.footer{padding:20px;text-align:center;color:#666}
-h1,h2{margin:8px 0 16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
-.card{display:block;padding:16px;border-radius:14px;background:#fff;border:1px solid #e6e6ef;text-decoration:none;color:#111}
-.card:hover{border-color:#c9c9dd}
-.filter,.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px}
-.btn,button{padding:8px 12px;border:1px solid #c9c9dd;border-radius:10px;background:#fff;cursor:pointer}
-.btn.primary,button[type=submit]{background:#2563eb;color:#fff;border-color:#2563eb}
-.table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden}
-.table th,.table td{border-bottom:1px solid #eee;padding:10px;vertical-align:top}
-.table th{background:#fafafa;text-align:left}
-.pre{white-space:pre-wrap}
-.actions{display:flex;gap:8px}
-label{display:flex;flex-direction:column;gap:6px;font-weight:600}
-input,select,textarea{padding:8px;border:1px solid #d7d7e6;border-radius:10px;background:#fff}
+/******************************************************
+ * 기술지원 전산처리시스템 - 스타일 가이드 (주석 풍부한 버전)
+ * 전체 레이아웃 중앙 정렬 + 우측 패널 높이 달력에 맞춤 포함
+ ******************************************************/
+
+/* ===== 공통 변수: 여기 숫자만 바꾸면 전체 규격 변경 ===== */
+:root {
+  /* 레이아웃 */
+  --sidebar-width: 240px;           /* 좌측 사이드바 폭 */
+  --content-max-width: 1200px;      /* 본문 최대 폭 (컨텐츠) */
+
+  /* 좌측 달력 + 우측 패널 2열 */
+  --calendar-min-width: 1000px;     /* 달력 최소 폭(좌측 컬럼 고정폭) */
+  --right-panel-width: 1000px;       /* 우측 패널 폭(우측 컬럼 고정폭) */
+  --grid-gap: 24px;                 /* 두 컬럼 사이 간격 */
+
+  /* 달력 격자 규격 */
+  --cell-height: 150px;             /* 달력 셀(일) 높이 */
+  --cell-gap: 8px;                  /* 셀/행 간격 */
+  --cell-radius: 14px;              /* 셀 모서리 */
+  --cell-padding: 8px;              /* 셀 내부 여백 */
+  --weekday-head-padding: 8px;      /* 요일 헤더 여백 */
+  --daynum-margin-bottom: 6px;      /* 날짜 숫자 아래 여백 */
+  --muted-opacity: 0.45;            /* 이전/다음달 흐림 강도(0~1) */
+
+  /* 오늘 강조 */
+  --today-ring-color: #2563eb;
+  --today-ring-thickness: 2px;
+  --today-ring-alpha: 0.13;
+
+  /* 버튼/입력 규격 */
+  --control-padding-y: 8px;
+  --control-padding-x: 12px;
+  --control-radius: 10px;
+
+  /* 이벤트 점(도트) */
+  --dot-size: 16px;                 /* 점 지름 */
+  --dot-gap: 8px;                   /* 점 간격 */
+  --dot-border: 3px;                /* 점 테두리 두께 */
+  --legend-dot-size: 10px;          /* 범례 점 지름 */
+  --legend-dot-border: 2px;         /* 범례 점 테두리 두께 */
+
+  /* 담당자 색상 팔레트(12색 순환) */
+  --mgr-0:  #2563eb; --mgr-0-bg:  #e8efff;
+  --mgr-1:  #16a34a; --mgr-1-bg:  #e6f6ea;
+  --mgr-2:  #f59e0b; --mgr-2-bg:  #fff3e0;
+  --mgr-3:  #dc2626; --mgr-3-bg:  #ffe9e9;
+  --mgr-4:  #7c3aed; --mgr-4-bg:  #efe7ff;
+  --mgr-5:  #06b6d4; --mgr-5-bg:  #e6fbff;
+  --mgr-6:  #10b981; --mgr-6-bg:  #e7fbf3;
+  --mgr-7:  #f43f5e; --mgr-7-bg:  #ffe8ee;
+  --mgr-8:  #a855f7; --mgr-8-bg:  #f3e8ff;
+  --mgr-9:  #0ea5e9; --mgr-9-bg:  #e6f5ff;
+  --mgr-10: #84cc16; --mgr-10-bg: #eef9df;
+  --mgr-11: #ef4444; --mgr-11-bg: #ffe9e9;
+}
+
+/* ===== 기본 리셋/타이포 ===== */
+*{ box-sizing: border-box; }
+body{
+  font-family: "Pretendard", system-ui, AppleSDGothicNeo, "Noto Sans KR", sans-serif;
+  margin: 0;
+  background: #f7f7fb;
+  color: #222;
+}
+
+/* ===== 전체 레이아웃(사이드바 + 컨텐츠) ===== */
+.layout{
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 80vh;
+}
+.sidebar{
+  background: #0f172a;
+  color: #fff;
+  padding: 18px 14px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.brand{ font-weight: 700; }
+.menu{ display: flex; flex-direction: column; gap: 10px; }
+.menu a{
+  color: #fff; text-decoration: none;
+  padding: 8px 10px; border-radius: 10px;
+}
+.menu a:hover{ background: #1e293b; }
+
+/* 컨텐츠 영역은 가운데 정렬(좌우 auto) */
+.content{
+  padding: 80px;
+  max-width: var(--content-max-width);
+  max-width: none !important;  /* ← 1200px 제한 해제 */
+  margin: 0;
+}
+
+.footer{
+  padding: 12px 16px; text-align: center;
+  color: #666; background: #f1f3f8;
+}
+h1,h2{ margin: 8px 0 16px; }
+
+/* ===== 공통 컨트롤(버튼/인풋) ===== */
+.btn,button{
+  padding: var(--control-padding-y) var(--control-padding-x);
+  border: 1px solid #c9c9dd;
+  border-radius: var(--control-radius);
+  background: #fff;
+  cursor: pointer;
+}
+.btn.primary,button[type=submit]{ background:#2563eb; color:#fff; border-color:#2563eb; }
+input,select,textarea{
+  padding: var(--control-padding-y);
+  border: 1px solid #d7d7e6;
+  border-radius: var(--control-radius);
+  background: #fff;
+}
+
+/* ===== 달력 페이지 2열 =====
+   - 고정폭 2열로 만들고 페이지 폭을 ‘합계’로 제한 → margin:auto로 중앙 배치
+   - align-items:stretch 로 두 컬럼 높이를 맞춤(우측 패널이 달력 높이에 맞춰 늘어남)
+*/
+.calendar-page{
+  display: grid;
+  grid-template-columns: var(--calendar-min-width) var(--right-panel-width);
+  column-gap: var(--grid-gap);
+  align-items: stretch; /* ← 두 컬럼 높이 동일하게 */
+  max-width: calc(var(--calendar-min-width) + var(--right-panel-width) + var(--grid-gap));
+  margin-left: auto; margin-right: auto; /* ← 페이지 중앙 정렬 */
+}
+
+/* 달력 래퍼가 그리드 컬럼 폭과 일치하도록 보장 */
+.calendar-wrap{ width: var(--calendar-min-width); }
+
+/* 화면이 충분히 좁아지면 1열로 전환 */
+@media (max-width: 1200px){
+  .calendar-page{
+    grid-template-columns: 1fr;
+    max-width: none; /* 모바일에서는 폭 제한 해제 */
+  }
+  .calendar-wrap{ width: 100%; }
+}
+
+/* ===== 달력 상단 컨트롤 ===== */
+.calendar-controls{
+  display:flex; align-items:center; gap:10px;
+  flex-wrap:wrap; margin-bottom:12px;
+}
+.month-label{ font-weight:700; min-width:120px; text-align:center; }
+.calendar-filters{ display:flex; gap:8px; align-items:center; }
+
+/* ===== 달력 그리드 ===== */
+.calendar-grid{ display:flex; flex-direction:column; gap:var(--cell-gap); }
+.calendar-row{  display:grid; grid-template-columns:repeat(7,1fr); gap:var(--cell-gap); }
+
+.cell{
+  background:#fff;
+  border:1px solid #e6e6ef;
+  border-radius:var(--cell-radius);
+  padding:var(--cell-padding);
+}
+.cell.head{
+  background:#eef2ff;
+  font-weight:700;
+  text-align:center;
+  min-height:auto;
+  padding:var(--weekday-head-padding);
+}
+
+.cell.day{
+  min-height:var(--cell-height);
+  max-height:var(--cell-height);
+  display:flex; flex-direction:column;
+}
+.cell.day.muted{ opacity:var(--muted-opacity); }
+.cell.day.today{
+  border-color:var(--today-ring-color);
+  box-shadow:0 0 0 var(--today-ring-thickness)
+             rgba(37,99,235,var(--today-ring-alpha));
+}
+.daynum{ font-weight:700; margin-bottom:var(--daynum-margin-bottom); }
+
+/* ===== 일정 표시: 텍스트 대신 색 점 ===== */
+.event-dots{
+  display:flex; flex-wrap:wrap;
+  gap:var(--dot-gap);
+  align-content:flex-start;
+  overflow:hidden; /* 셀 높이 넘어가면 잘라냄 */
+}
+.dot{
+  width:var(--dot-size);
+  height:var(--dot-size);
+  border-radius:50%;
+  display:inline-block;
+  border:var(--dot-border) solid transparent;
+}
+.more-count{ font-size:12px; color:#666; margin-left:6px; }
+
+/* ===== 담당자별 색상 매핑 ===== */
+.dot.mgr-0  { background:var(--mgr-0-bg);  border-color:var(--mgr-0);  }
+.dot.mgr-1  { background:var(--mgr-1-bg);  border-color:var(--mgr-1);  }
+.dot.mgr-2  { background:var(--mgr-2-bg);  border-color:var(--mgr-2);  }
+.dot.mgr-3  { background:var(--mgr-3-bg);  border-color:var(--mgr-3);  }
+.dot.mgr-4  { background:var(--mgr-4-bg);  border-color:var(--mgr-4);  }
+.dot.mgr-5  { background:var(--mgr-5-bg);  border-color:var(--mgr-5);  }
+.dot.mgr-6  { background:var(--mgr-6-bg);  border-color:var(--mgr-6);  }
+.dot.mgr-7  { background:var(--mgr-7-bg);  border-color:var(--mgr-7);  }
+.dot.mgr-8  { background:var(--mgr-8-bg);  border-color:var(--mgr-8);  }
+.dot.mgr-9  { background:var(--mgr-9-bg);  border-color:var(--mgr-9);  }
+.dot.mgr-10 { background:var(--mgr-10-bg); border-color:var(--mgr-10); }
+.dot.mgr-11 { background:var(--mgr-11-bg); border-color:var(--mgr-11); }
+
+/* ===== 색상 범례 ===== */
+.legend{
+  display:flex; flex-wrap:wrap; gap:12px; margin-top:10px;
+}
+.legend-item{ display:flex; align-items:center; gap:6px; color:#555; font-size:13px; }
+.legend .dot{
+  width:var(--legend-dot-size);
+  height:var(--legend-dot-size);
+  border-width:var(--legend-dot-border);
+}
+
+/* ===== 우측 패널 =====
+   - 그리드의 align-items:stretch와 함께 높이를 달력에 맞춰 늘림
+   - 내부 콘텐츠가 적어도 흰 박스는 전체 높이를 유지
+*/
+.right-panel{
+  background:#fff;
+  border:1px solid #e6e6ef;
+  border-radius:14px;
+  padding:14px;
+  padding-top: 10px !important;   /* 상단 여백 줄임 */
+  padding-bottom: 10px !important;/* 하단 여백 줄임 */
+  margin-top: 8px !important;     /* 필요시 줄이기 */
+  margin-bottom: 8px !important;
+  margin: auto 0;  
+}
+.panel-filter{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:8px; margin-bottom:12px;
+}
+.panel-filter .btn{ grid-column:auto / span 1; }
+.panel-tip{
+  font-size:13px; color:#666;
+  background:#f7f8ff; border:1px dashed #cdd3ff;
+  border-radius:10px; padding:10px;
+}
+
+/* 모바일/협소 화면에서 패널 필터는 2열 */
+@media (max-width: 1200px){
+  .panel-filter{ grid-template-columns:repeat(2,1fr); }
+}

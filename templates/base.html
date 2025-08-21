@@ -9,14 +9,20 @@
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600&display=swap" rel="stylesheet">
 </head>
 <body>
-  <nav class="nav">
-    <a href="/">대시보드</a>
-    <a href="/reports">현장관리보고서</a>
-    <a href="/schedule">일정관리</a>
-  </nav>
-  <main class="container">
-    {% block content %}{% endblock %}
-  </main>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">⚙️ 기술지원</div>
+      <nav class="menu">
+        <a href="/calendar">📅 달력</a>
+        <a href="/reports">📝 현장관리보고서</a>
+        <a href="/schedule">🗂️ 일정관리</a>
+        <a href="/docs">📄 서류목록</a>
+      </nav>
+    </aside>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
   <footer class="footer">© 기술지원부</footer>
 </body>
 </html>

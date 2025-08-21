@@ -1,3 +1,4 @@
+from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request, Depends, Form, HTTPException
 from fastapi.responses import RedirectResponse, StreamingResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -505,6 +506,50 @@ def schedule_delete(sid: int):
         db.commit()
     db.close()
     return RedirectResponse(url="/schedule", status_code=303)
+
+@app.get("/")
+def index_calendar():
+    return render("index.html", MANAGERS=MANAGERS)
+
+@app.get("/calendar")
+def calendar_page():
+    return render("index.html", MANAGERS=MANAGERS)
+
+@app.get("/api/schedule")
+def api_schedule(fdate: Optional[str] = None, tdate: Optional[str] = None, manager: Optional[str] = None, q: Optional[str] = None):
+    db = SessionLocal()
+    qry = db.query(Schedule)
+    if fdate:
+        qry = qry.filter(Schedule.date >= parse_date(fdate))
+    if tdate:
+        qry = qry.filter(Schedule.date <= parse_date(tdate))
+    if manager:
+        qry = qry.filter(Schedule.manager == manager)
+    if q:
+        like = f"%{q}%"
+        from sqlalchemy import or_
+        qry = qry.filter(or_(Schedule.title.like(like), Schedule.site.like(like), Schedule.memo.like(like)))
+    items = qry.order_by(Schedule.date.asc()).all()
+    db.close()
+    data = [
+        {
+            "id": s.id,
+            "date": s.date.strftime("%Y-%m-%d"),
+            "title": s.title,
+            "site": s.site or "",
+            "manager": s.manager,
+            "start_time": s.start_time or "",
+            "end_time": s.end_time or "",
+            "memo": s.memo or "",
+        }
+        for s in items
+    ]
+    return JSONResponse(data)
+
+@app.get("/docs")
+def docs_list():
+    # 최소 페이지(추후 업로드/버전관리 붙일 자리)
+    return render("docs_list.html")
 
 # --------------- run tip ---------------
 # uvicorn app:app --host 0.0.0.0 --port 8000
