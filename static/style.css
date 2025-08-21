@@ -1,0 +1,19 @@
+*{box-sizing:border-box}body{font-family:"Pretendard",system-ui,AppleSDGothicNeo,"Noto Sans KR",sans-serif;margin:0;background:#f7f7fb;color:#222}
+.nav{display:flex;gap:16px;padding:14px 20px;background:#0f172a}
+.nav a{color:#fff;text-decoration:none;font-weight:600}
+.container{padding:20px;max-width:1100px;margin:0 auto}
+.footer{padding:20px;text-align:center;color:#666}
+h1,h2{margin:8px 0 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.card{display:block;padding:16px;border-radius:14px;background:#fff;border:1px solid #e6e6ef;text-decoration:none;color:#111}
+.card:hover{border-color:#c9c9dd}
+.filter,.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px}
+.btn,button{padding:8px 12px;border:1px solid #c9c9dd;border-radius:10px;background:#fff;cursor:pointer}
+.btn.primary,button[type=submit]{background:#2563eb;color:#fff;border-color:#2563eb}
+.table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden}
+.table th,.table td{border-bottom:1px solid #eee;padding:10px;vertical-align:top}
+.table th{background:#fafafa;text-align:left}
+.pre{white-space:pre-wrap}
+.actions{display:flex;gap:8px}
+label{display:flex;flex-direction:column;gap:6px;font-weight:600}
+input,select,textarea{padding:8px;border:1px solid #d7d7e6;border-radius:10px;background:#fff}

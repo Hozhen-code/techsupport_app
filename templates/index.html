@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>기술지원 전산처리시스템</h1>
+<p>좌측 메뉴에서 현장관리보고서/일정관리 기능을 사용하세요.</p>
+<div class="grid">
+  <a class="card" href="/reports">
+    <h3>현장관리보고서</h3>
+    <p>CS 내역을 등록/수정/검색하고 CSV로 내보내기</p>
+  </a>
+  <a class="card" href="/schedule">
+    <h3>일정관리</h3>
+    <p>현장 일정 등록/수정/검색</p>
+  </a>
+</div>
+{% endblock %}
