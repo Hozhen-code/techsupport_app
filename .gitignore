@@ -1,0 +1,14 @@
+# 1) .gitignore 생성(또는 업데이트)
+echo "__pycache__/
+*.pyc
+*.pyo
+*.pyd
+techsupport.db
+.env
+*.sqlite3
+" >> .gitignore
+
+# 2) 이미 스테이지/커밋된 민감/불필요 파일 추적 해제
+git rm -r --cached __pycache__ techsupport.db .env
+git add .gitignore
+git commit -m "chore: add .gitignore and remove secrets and artifacts"
