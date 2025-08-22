@@ -250,3 +250,358 @@ input,select,textarea{
 @media (max-width: 1200px){
   .panel-filter{ grid-template-columns:repeat(2,1fr); }
 }
+
+/******************************************************
+ * Reports page scoped styles (reports_list.html 전용)
+ * - 칼럼 폭을 고정(width) 대신 min-width 중심으로 → 유연한 레이아웃
+ * - ID/날짜는 좁게, 나머지는 내용에 따라 확장
+ ******************************************************/
+
+/* 검색 필터 */
+.reports-page form.filter {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(140px, 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+@media (max-width: 1200px) {
+  .reports-page form.filter {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+}
+.reports-page form.filter input[type="date"],
+.reports-page form.filter select,
+.reports-page form.filter input[type="text"] {
+  height: 40px;
+  font-size: 14px;
+}
+.reports-page form.filter button,
+.reports-page form.filter .btn {
+  height: 40px;
+  white-space: nowrap;
+}
+
+/* 테이블 기본 */
+.reports-page table.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #e6e6ef;
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 14px;
+
+  display: block;        /* 가로 스크롤 허용 */
+  overflow-x: auto;
+}
+.reports-page table.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f6f7fb;
+  font-weight: 700;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e9e9f2;
+}
+.reports-page table.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0f0f6;
+  vertical-align: top;
+  color: #333;
+}
+.reports-page table.table tbody tr:nth-child(odd) { background: #fff; }
+.reports-page table.table tbody tr:nth-child(even) { background: #fafbff; }
+.reports-page table.table tbody tr:hover { background: #eef2ff; }
+
+/* === 칼럼 폭 규칙 (수정) ===
+   - width 대신 min-width로 여유 확보
+   - 남는 공간은 자동으로 다른 칼럼이 가져감
+*/
+.reports-page table.table th,
+.reports-page table.table td {
+  min-width: 100px;   /* 기본 최소폭 */
+}
+
+/* ID (좁게) */
+.reports-page table.table th:nth-child(1),
+.reports-page table.table td:nth-child(1) {
+  min-width: 50px;
+  max-width: 50px;
+  width: 60px;
+  text-align: center;
+}
+
+/* 날짜 */
+.reports-page table.table th:nth-child(2),
+.reports-page table.table td:nth-child(2) {
+  min-width: 150px;
+  max-width: 150px;
+  text-align: center;
+}
+
+/* 현장이름 */
+.reports-page table.table th:nth-child(3),
+.reports-page table.table td:nth-child(3) {
+  min-width: 300px;
+  max-width: 300px;
+  text-align: center;
+}
+
+/* CS내역 */
+.reports-page table.table th:nth-child(4),
+.reports-page table.table td:nth-child(4) {
+  min-width: 1000px;
+  max-width: 1000px;
+  text-align: center;
+}
+
+/* 담당자 */
+.reports-page table.table th:nth-child(5),
+.reports-page table.table td:nth-child(5) {
+  min-width: 150px;
+  max-width: 150px;
+  text-align: center;
+}
+
+/* 상태 */
+.reports-page table.table th:nth-child(6),
+.reports-page table.table td:nth-child(6) {
+  min-width: 150px;
+  max-width: 150px;
+  text-align: center;
+}
+
+/* 액션(수정/삭제) */
+.reports-page table.table th:last-child,
+.reports-page table.table td:last-child {
+  min-width: 150px;
+  text-align: center;
+}
+
+/* 비고 */
+.reports-page table.table th:nth-child(7),
+.reports-page table.table td:nth-child(7) {
+  min-width: 200px;
+  max-width: 200px;
+  text-align: center;
+}
+
+/* CS내역: 3줄 말줄임 + 호버시 펼침 */
+.reports-page table.table td.pre {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-height: 4.8em;
+  line-height: 1.6;
+  cursor: help;
+}
+.reports-page table.table td.pre:hover {
+  -webkit-line-clamp: unset;
+  max-height: 400px;
+  overflow: auto;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px #e9e9f2;
+  padding-right: 8px;
+}
+
+/* 액션 버튼 */
+.reports-page table.table td:last-child { white-space: nowrap; }
+.reports-page table.table td:last-child a,
+.reports-page table.table td:last-child button {
+  display: inline-block;
+  margin-right: 6px;
+}
+.reports-page table.table td:last-child button {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #e1e1ec;
+  background: #fff;
+}
+.reports-page table.table td:last-child button:hover { background: #f6f7fb; }
+
+/* 상태 컬럼: 색 강조 가능 (기본은 연회색 배경) */
+.reports-page table.table td:nth-child(6) {
+  background: #f9fafc;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+/******************************************************
+ * reports_list 개선: 격자선 + 액션버튼(수정/삭제) 스타일
+ ******************************************************/
+
+/* 1) 테이블 격자선(세로 라인 추가) */
+.reports-page table.table thead th,
+.reports-page table.table td{
+  border-right: 2px solid #ececf5;           /* 세로선 */
+}
+.reports-page table.table thead th:last-child,
+.reports-page table.table td:last-child{
+  border-right: none;                         /* 마지막 칸은 외곽선과 겹치므로 제거 */
+}
+
+/* 2) 액션 칼럼 버튼화: a=수정(초록), button=삭제(빨강) */
+.reports-page table.table td:last-child a,
+.reports-page table.table td:last-child button{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1;
+  border: 1px solid transparent;
+  text-decoration: none;                      /* a 밑줄 제거 */
+  cursor: pointer;
+  transition: transform .02s ease, filter .15s ease;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+}
+
+/* 수정 = 초록 */
+.reports-page table.table td:last-child a{
+  background: #16a34a;                        /* green-600 */
+  border-color: #16a34a;
+  color: #fff;
+}
+.reports-page table.table td:last-child a:hover{
+  filter: brightness(0.95);
+}
+.reports-page table.table td:last-child a:active{
+  transform: translateY(1px);
+}
+
+/* 삭제 = 빨강 */
+.reports-page table.table td:last-child button{
+  background: #dc2626;                        /* red-600 */
+  border-color: #dc2626;
+  color: #fff;
+}
+.reports-page table.table td:last-child button:hover{
+  filter: brightness(0.95);
+}
+.reports-page table.table td:last-child button:active{
+  transform: translateY(1px);
+}
+
+/* (선택) 액션 칼럼 간격 조금 확보 */
+.reports-page table.table td:last-child a,
+.reports-page table.table td:last-child button{
+  margin-right: 8px;
+}
+.reports-page table.table td:last-child a:last-child,
+.reports-page table.table td:last-child button:last-child{
+  margin-right: 0;
+}
+
+/******************************************************
+ * 상단 액션 버튼 스타일 (CSV 내보내기 / + 새 보고서)
+ ******************************************************/
+
+/* 공통 버튼화: a 링크도 버튼처럼 보이게 */
+.reports-page form.filter a.btn,
+.reports-page form.filter button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;                   /* 필터 높이와 동일 */
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid #d1d5e8;
+  background: #fff;
+  color: #111;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;           /* ← 밑줄 제거 */
+  box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+  transition: filter .15s ease, transform .02s ease;
+}
+
+/* 호버/클릭 */
+.reports-page form.filter a.btn:hover,
+.reports-page form.filter button:hover { background: #f6f7fb; }
+.reports-page form.filter a.btn:active,
+.reports-page form.filter button:active { transform: translateY(1px); }
+
+/* 파란 기본(primary) → + 새 보고서 */
+.reports-page form.filter a.btn.primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.reports-page form.filter a.btn.primary:hover { filter: brightness(0.95); }
+
+/* CSV 내보내기(윤곽/아웃라인 스타일) */
+.reports-page form.filter a.btn:not(.primary) {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #fff;
+}
+.reports-page form.filter a.btn:not(.primary):hover {
+  background: #eff6ff;
+}
+
+/******************************************************
+ * reports_list 추가 개선
+ * - 테이블 폭 고정(table-layout: fixed)
+ * - 각 칼럼별 줄바꿈 / 말줄임 처리 규칙
+ ******************************************************/
+
+/* 1) 테이블 폭 고정: 내용 길이에 따라 폭이 밀리지 않도록 */
+.reports-page table.table {
+  table-layout: fixed;   /* ← 칼럼 폭은 CSS width 기준으로 고정 */
+  word-wrap: break-word; /* 내용이 칼럼 안에서 줄바꿈되도록 */
+}
+
+/* 2) 공통: 긴 텍스트는 칼럼 안에서 처리 */
+.reports-page table.table th,
+.reports-page table.table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 3) ID, 날짜, 담당자, 상태, 액션 칼럼 → 말줄임(...) */
+.reports-page table.table td:nth-child(1),
+.reports-page table.table td:nth-child(2),
+.reports-page table.table td:nth-child(5),
+.reports-page table.table td:nth-child(6),
+.reports-page table.table td:last-child {
+  white-space: nowrap;        /* 줄바꿈 안함 */
+  text-overflow: ellipsis;    /* 넘치면 ... */
+}
+
+/* 4) 현장이름 / CS내역 / 비고 → 줄바꿈 허용 */
+.reports-page table.table td:nth-child(3),
+.reports-page table.table td:nth-child(4),
+.reports-page table.table td:nth-child(7) {
+  white-space: normal;        /* 여러 줄 허용 */
+  word-break: break-word;     /* 단어 단위로 줄바꿈 */
+  text-overflow: clip;        /* ... 대신 잘림 */
+}
+
+/* 5) CS내역(pre) 칼럼 → 기존 hover 펼침 효과 유지 */
+.reports-page table.table td.pre {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-height: 4.8em;
+  line-height: 1.6;
+  cursor: help;
+}
+.reports-page table.table td.pre:hover {
+  -webkit-line-clamp: unset;
+  max-height: 400px;
+  overflow: auto;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px #e9e9f2;
+  padding-right: 8px;
+}
