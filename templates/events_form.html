@@ -1,49 +1,98 @@
 {% extends "base.html" %}
-
 {% block content %}
-<section class="form-page">
-  <h2>{{ "새 일정" if mode=="new" else "일정 수정" }}</h2>
+<section class="page">
+  <h2>{{ '일정 수정' if mode=='edit' else '새 일정' }}</h2>
 
-  <form method="post" class="form">
-    <div class="grid">
-      <label>제목
-        <input type="text" name="title" value="{{ data.title }}" required>
-      </label>
-      <label>시작일(또는 시작일시)
-        <input type="text" name="start" value="{{ data.start }}" placeholder="YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM" required>
-      </label>
-      <label>종료일(선택)
-        <input type="text" name="end" value="{{ data.end or '' }}" placeholder="YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM">
-      </label>
-      <label>담당자
-        <input type="text" name="manager" value="{{ data.manager }}">
-      </label>
-      <label>현장
-        <input type="text" name="site" value="{{ data.site }}">
-      </label>
-      <label>상태
-        <select name="status">
+  <form method="post" class="card form-wrap">
+    <!-- 제목 -->
+    <div class="row">
+      <label class="label">제목</label>
+      <input class="input" type="text" name="title" value="{{ data.get('title','') }}" required />
+    </div>
+
+    <!-- 기간 -->
+    <div class="row grid-2">
+      <div>
+        <label class="label">시작일</label>
+        <input class="input" type="date" name="start" value="{{ data.get('start','') }}" required />
+      </div>
+      <div>
+        <label class="label">종료일</label>
+        <input class="input" type="date" name="end" value="{{ data.get('end','') or '' }}" />
+      </div>
+    </div>
+
+    <!-- 담당자 / 상태 -->
+    <div class="row grid-2">
+      <div>
+        <label class="label">담당자</label>
+        <input class="input" type="text" name="manager" value="{{ data.get('manager','') }}" />
+      </div>
+      <div>
+        <label class="label">상태</label>
+        <select class="input" name="status">
           {% for s in ["진행","완료","보류"] %}
-            <option value="{{s}}" {% if data.status==s %}selected{% endif %}>{{s}}</option>
+            <option value="{{s}}" {% if data.get('status','진행')==s %}selected{% endif %}>{{s}}</option>
           {% endfor %}
         </select>
-      </label>
-      <label>색상(선택)
-        <input type="color" name="color" value="{{ data.color or '' }}">
-      </label>
+      </div>
     </div>
 
-    <div class="actions">
-      <a class="btn" href="/calendar">← 돌아가기</a>
-      {% if mode == "edit" %}
-      <button class="btn-danger" form="del" type="submit">삭제</button>
-      {% endif %}
-      <button class="btn-primary" type="submit">{{ "저장" }}</button>
+    <!-- 현장 선택: sites 테이블의 현장명만 -->
+    <div class="row">
+      <label class="label">현장</label>
+      <select class="input" name="site" size="6">
+        {% if sites and sites|length > 0 %}
+          {% for s in sites %}
+            <option value="{{ s['name'] }}" {% if data.get('site','')==s['name'] %}selected{% endif %}>{{ s['name'] }}</option>
+          {% endfor %}
+        {% else %}
+          <option disabled>등록된 현장 정보가 없습니다. (좌측 메뉴 &gt; 현장 정보에서 추가)</option>
+        {% endif %}
+      </select>
+      <small class="help">목록에서 스크롤/클릭으로 선택합니다.</small>
+    </div>
+
+    <!-- 색상 선택: 빨/주/노/초/파/남/보 -->
+    <div class="row">
+      <label class="label">색상</label>
+      <div class="color-palette">
+        {% set picked = data.get('color') or default_color %}
+        {% for c in color_palette %}
+          <label class="chip">
+            <input type="radio" name="color" value="{{ c.hex }}" {% if picked==c.hex %}checked{% endif %}/>
+            <span class="dot" style="background: {{ c.hex }}"></span>
+            <span class="chip-label">{{ c.name }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="row actions">
+      <button type="submit" class="btn primary">{{ '저장' if mode=='edit' else '등록' }}</button>
+      <a class="btn" href="/calendar">취소</a>
     </div>
   </form>
-
-  {% if mode == "edit" %}
-  <form id="del" method="post" action="/events/delete/{{ data.id }}" onsubmit="return confirm('삭제할까요?')"></form>
-  {% endif %}
 </section>
+
+<style>
+  .page { max-width: 780px; }
+  .card { background:#fff; border:1px solid #e6e6ef; border-radius:12px; padding:16px; }
+  .row { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+  .grid-2 { display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; }
+  .label { font-weight:700; }
+  .input { height:40px; padding:8px 10px; border:1px solid #d8d8e6; border-radius:10px; }
+  select.input { height:auto; min-height: 40px; width : auto;}
+  .help { color:#666; }
+  .actions { display:flex; gap:8px; }
+  .btn { padding:10px 14px; border:1px solid #cfd3e6; border-radius:10px; background:#fff; text-decoration:none; color:#111; }
+  .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+  .color-palette { display:flex; gap:10px; flex-wrap:wrap; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid #e3e6f2; border-radius:999px; cursor:pointer; user-select:none; }
+  .chip input { display:none; }
+  .chip input:checked + .dot { outline: 2px solid #1113; outline-offset: 2px; }
+  .dot { width:16px; height:16px; border-radius:50%; display:inline-block; }
+  .chip-label { font-size:13px; color:#333; }
+  @media (max-width: 800px) { .grid-2{ grid-template-columns: 1fr; } }
+</style>
 {% endblock %}

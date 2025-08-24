@@ -1,22 +1,22 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="form-page">
-  <h2>{{ "새 보고서" if mode=="new" else "보고서 수정" }}</h2>
+<section class="reports-page">
+  <h2>현장관리보고서 {{ '작성' if mode=='new' else '수정' }}</h2>
 
-  <form method="post" class="form">
+  <form method="post" enctype="multipart/form-data" class="report-form">
     <div class="grid">
       <label>날짜
         <input type="date" name="date" value="{{ data.date }}" required>
       </label>
+
       <label>현장이름
         <input type="text" name="site" value="{{ data.site }}" required>
       </label>
-      <label class="full">CS내역
-        <textarea name="detail" rows="6" required>{{ data.detail }}</textarea>
-      </label>
+
       <label>담당자
-        <input type="text" name="manager" value="{{ data.manager }}">
+        <input type="text" name="manager" value="{{ data.manager or '' }}">
       </label>
+
       <label>상태
         <select name="status">
           {% for s in ["진행","완료","보류"] %}
@@ -24,22 +24,44 @@
           {% endfor %}
         </select>
       </label>
+
+      <label class="full">CS 내역
+        <textarea name="detail" rows="6" required>{{ data.detail }}</textarea>
+      </label>
+
       <label class="full">비고
-        <input type="text" name="note" value="{{ data.note }}">
+        <input type="text" name="note" value="{{ data.note or '' }}">
+      </label>
+
+      <!-- ★ 사진 첨부(여러 장) -->
+      <label class="full">사진 첨부(여러 장 가능)
+        <input type="file" name="photos" multiple accept="image/*,.heic,.heif">
+        <small class="hint">JPG/PNG/GIF/WEBP/HEIC(아이폰) · 여러 장 선택 가능</small>
       </label>
     </div>
 
-    <div class="actions">
-      <a class="btn" href="/reports">← 목록</a>
-      {% if mode=="edit" %}
-      <button class="btn danger" form="del" type="submit">삭제</button>
-      {% endif %}
-      <button class="btn primary" type="submit">저장</button>
+    <!-- 기존 첨부(수정 모드) -->
+    {% if files %}
+    <div class="thumbs">
+      {% for f in files %}
+      <div class="thumb">
+        <a href="/uploads/reports/{{ f.filename }}" target="_blank">
+          <img src="/uploads/reports/{{ f.filename }}" alt="{{ f.orig_name }}">
+        </a>
+        <div class="tname" title="{{ f.orig_name }}">{{ f.orig_name }}</div>
+        <form method="post" action="/reports/file/delete/{{ f.id }}" onsubmit="return confirm('이 파일을 삭제할까요?');">
+          <input type="hidden" name="rid" value="{{ data.id }}">
+          <button type="submit" class="btn btn-danger btn-sm">파일 삭제</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="form-actions">
+      <a href="/reports" class="btn">목록</a>
+      <button type="submit" class="btn primary">저장</button>
     </div>
   </form>
-
-  {% if mode=="edit" %}
-  <form id="del" method="post" action="/reports/delete/{{ data.id }}" onsubmit="return confirm('삭제할까요?')"></form>
-  {% endif %}
 </section>
 {% endblock %}

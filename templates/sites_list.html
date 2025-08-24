@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="reports-page">
+  <h2>현장 정보</h2>
+
+  <form method="get" class="filter" style="grid-template-columns: 1fr auto;">
+    <input type="text" name="q" value="{{ q }}" placeholder="현장명/주소/IP/서버 위치 검색" />
+    <div>
+      <a class="btn primary" href="/sites/new">+ 새 현장</a>
+    </div>
+  </form>
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th style="width:60px; text-align:center;">ID</th>
+        <th style="width:120px; text-align:center;>">현장명</th>
+        <th style="width:160px; text-align:center;>">주소</th>
+        <th style="width:100px; text-align:center;">카메라(개)</th>
+        <th style="width:180px;">IP 대역</th>
+        <th style="width:160px;">서버 위치</th>
+        <th style="width:160px; text-align:center;">작업</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in items %}
+      <tr>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ s.id }}</td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ s.name }}</td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ s.address }}</td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ s.camera_count or "" }}</td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ s.ip or "" }}</td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ s.server_location or "" }}</td>
+        <td class="actions" style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">
+          <a href="/sites/edit/{{ s.id }}" class="btn-action edit">수정</a>
+          <form method="post" action="/sites/delete/{{ s.id }}" style="display:inline;" onsubmit="return confirm('삭제할까요?');">
+            <button type="submit" class="btn-action delete">삭제</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if items|length == 0 %}
+      <tr><td colspan="7" style="text-align:center; color:#777;">등록된 현장이 없습니다.</td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

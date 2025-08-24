@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="reports-page">
+  <h2>현장 정보 {{ "등록" if mode=="new" else "수정" }}</h2>
+
+  {% if error %}
+    <div style="padding:10px; border:1px solid #f1c0c0; background:#fff1f1; color:#b11;">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <form method="post" class="filter" style="grid-template-columns: 1fr 3fr;">
+    <label>현장명<span style="color:#e11;">*</span></label>
+    <input type="text" name="name" required value="{{ data.name }}" />
+
+    <label>주소<span style="color:#e11;">*</span></label>
+    <input type="text" name="address" required value="{{ data.address }}" />
+
+    <label>카메라 갯수(개)</label>
+    <input type="number" name="camera_count" min="0" step="1" value="{{ data.camera_count }}" />
+
+    <label>사용 IP</label>
+    <input type="text" name="ip" value="{{ data.ip }}" placeholder="예: 192.168.1.10/24" />
+
+    <label>서버 위치</label>
+    <input type="text" name="server_location" value="{{ data.server_location }}" placeholder="예: 본사 3층 랙-2" />
+
+    <div></div>
+    <div>
+      <button type="submit" class="btn primary">{{ "등록" if mode=="new" else "저장" }}</button>
+      <a class="btn" href="/sites">목록</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

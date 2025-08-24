@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="forms-page">
+  <div class="d-flex" style="align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
+    <h2 style="margin:0;">서류 양식</h2>
+    <a class="btn primary" href="/forms/new">+ 새 서류</a>
+  </div>
+
+  <table class="table" style="width:100%; border-collapse:collapse; background:#fff; border:1px solid #e6e6ef; border-radius:12px; overflow:hidden;">
+    <thead>
+      <tr style="background:#f6f7fb;">
+        <th style="padding:10px 12px; text-align:center;">ID</th>
+        <th style="padding:10px 12px; text-align:center;">서류명</th>
+        <th style="padding:10px 12px; text-align:center;">제출목적</th>
+        <th style="padding:10px 12px; text-align:center;">첨부파일</th>
+        <th style="padding:10px 12px; text-align:center;">수정일</th>
+        <th style="padding:10px 12px; text-align:center;">작업</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for f in items %}
+      <tr>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ f.id }}</td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">
+          <a href="/forms/file/{{ f.id }}" style="text-decoration:none; color:#2563eb;">{{ f.name }}</a>
+        </td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ f.purpose or "" }}</td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">
+          {% if f.file_name %}<a href="/forms/file/{{ f.id }}">{{ f.file_name }}</a>{% else %}-{% endif %}
+        </td>
+        <td style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">{{ f.uploaded_at or "" }}</td>
+        <td class="actions" style="padding:10px 12px; text-align:center; border-top:1px solid #f0f0f6;">
+          <a href="/forms/edit/{{ f.id }}" class="btn-action edit">수정</a>
+          <form method="post" action="/forms/delete/{{ f.id }}" style="display:inline;" onsubmit="return confirm('삭제할까요?');">
+            <button type="submit" class="btn-action delete">삭제</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

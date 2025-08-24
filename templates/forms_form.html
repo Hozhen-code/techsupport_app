@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="forms-form">
+  <h2>{{ "새 서류" if mode=="new" else "서류 수정" }}</h2>
+
+  <form method="post" enctype="multipart/form-data" class="form" style="display:grid; gap:12px; max-width:720px;">
+    <div>
+      <label>서류명 *</label><br/>
+      <input type="text" name="name" value="{{ data.name or '' }}" required style="width:100%; height:40px;">
+    </div>
+    <div>
+      <label>제출목적</label><br/>
+      <textarea name="purpose" rows="4" style="width:100%;">{{ data.purpose or '' }}</textarea>
+    </div>
+    <div>
+      <label>첨부파일 {{ "(업로드 시 교체)" if mode=="edit" else "*" }}</label><br/>
+      <input type="file" name="file"
+             {% if mode=="new" %}required{% endif %}
+             accept=".csv,.doc,.docx,.hwp,.pdf">
+      {% if mode=="edit" and data.file_name %}
+        <div style="margin-top:6px; font-size:14px;">
+          현재 파일: <a href="/forms/file/{{ data.id }}">{{ data.file_name }}</a>
+        </div>
+      {% endif %}
+      <div style="color:#666; font-size:12px; margin-top:6px;">
+        허용: CSV, DOC, DOCX, HWP, PDF ({{ MAX_FORM_MB }}MB 이하)
+      </div>
+    </div>
+
+    <div style="margin-top:8px;">
+      <button type="submit" class="btn primary">{{ "저장" if mode=="new" else "수정 완료" }}</button>
+      <a href="/forms" class="btn">취소</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
