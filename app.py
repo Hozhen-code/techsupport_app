@@ -1,555 +1,413 @@
-from fastapi.responses import JSONResponse
-from fastapi import FastAPI, Request, Depends, Form, HTTPException
-from fastapi.responses import RedirectResponse, StreamingResponse, HTMLResponse, PlainTextResponse
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from starlette.middleware.sessions import SessionMiddleware
-
-from sqlalchemy import create_engine, Column, Integer, String, Date, Text
-from sqlalchemy.orm import sessionmaker, declarative_base
-
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
-from datetime import datetime, date
+from fastapi.templating import Jinja2Templates
+import sqlite3
+import datetime as dt
 from typing import Optional
-from dotenv import load_dotenv
-import os, io, csv
 
-# -------------------------
-# Config
-# -------------------------
-load_dotenv()
-APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
-APP_PORT = int(os.getenv("APP_PORT", "8000"))
-ADMIN_USER = os.getenv("ADMIN_USER", "admin")
-ADMIN_PASS = os.getenv("ADMIN_PASS", "changeme")
-MANAGERS = [m.strip() for m in os.getenv("MANAGERS", "관리자").split(",") if m.strip()]
+app = FastAPI()
 
-# -------------------------
-# FastAPI, Static, Templates
-# -------------------------
-app = FastAPI(title="기술지원 전산처리시스템")
-app.add_middleware(SessionMiddleware, secret_key="replace-this-with-a-random-string")
-
-# 정적 파일/템플릿 폴더가 없으면 만들어 둠(최초 실행 안전장치)
-if not os.path.isdir("static"):
-    os.makedirs("static", exist_ok=True)
-if not os.path.isdir("templates"):
-    os.makedirs("templates", exist_ok=True)
-
+# 정적/템플릿
 app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Environment(
-    loader=FileSystemLoader("templates"),
-    autoescape=select_autoescape(["html", "xml"]),
-)
+templates = Jinja2Templates(directory="templates")
 
-def render(template_name: str, **ctx) -> HTMLResponse:
-    tmpl = templates.get_template(template_name)
-    return HTMLResponse(tmpl.render(**ctx))
+DB_PATH = "app.db"
 
-# -------------------------
-# Auth (Basic)
-# -------------------------
-security = HTTPBasic()
+# ---------- 공용 유틸 ----------
+def db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-def check_auth(credentials: HTTPBasicCredentials = Depends(security)) -> bool:
-    if credentials.username == ADMIN_USER and credentials.password == ADMIN_PASS:
-        return True
-    raise HTTPException(status_code=401, detail="Unauthorized")
+COLORS = [
+    "#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#06b6d4",
+    "#10b981", "#f43f5e", "#a855f7", "#0ea5e9", "#84cc16", "#ef4444"
+]
 
-# -------------------------
-# DB (SQLite + SQLAlchemy)
-# -------------------------
-Base = declarative_base()
-engine = create_engine(
-    "sqlite:///techsupport.db", connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(bind=engine)
-
-class Report(Base):
-    __tablename__ = "reports"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    date = Column(Date, nullable=False)
-    site = Column(String(200), nullable=False)
-    detail = Column(Text, nullable=False)
-    manager = Column(String(100), nullable=False)
-    status = Column(String(20), nullable=False, default="진행")  # 진행/완료/보류
-    note = Column(String(500), nullable=True)
-
-class Schedule(Base):
-    __tablename__ = "schedules"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    date = Column(Date, nullable=False)
-    title = Column(String(200), nullable=False)
-    site = Column(String(200), nullable=True)
-    manager = Column(String(100), nullable=False)
-    start_time = Column(String(5), nullable=True)  # HH:MM
-    end_time = Column(String(5), nullable=True)    # HH:MM
-    memo = Column(String(500), nullable=True)
-
-Base.metadata.create_all(engine)
-
-# -------------------------
-# Helpers
-# -------------------------
-def parse_date(s: Optional[str]) -> Optional[date]:
-    if not s:
+def color_for_manager(name: Optional[str]) -> Optional[str]:
+    if not name:
         return None
-    return datetime.strptime(s, "%Y-%m-%d").date()
+    h = 0
+    for ch in name:
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    return COLORS[h % len(COLORS)]
 
-# -------------------------
-# Routes
-# -------------------------
-@app.get("/health")
-def health():
-    return PlainTextResponse("ok")
+def init_db():
+    conn = db()
+    cur = conn.cursor()
 
-@app.get("/")
-def index():
-    # 템플릿 없을 때 임시 안내
-    if not os.path.isfile(os.path.join("templates", "index.html")):
-        return HTMLResponse(
-            "<h1>기술지원 전산처리시스템</h1>"
-            "<p>템플릿이 아직 없습니다. /reports 또는 /schedule 로 이동해 사용하세요.</p>"
+    # 일정 테이블
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title   TEXT NOT NULL,
+            start   TEXT NOT NULL,
+            end     TEXT,
+            manager TEXT,
+            site    TEXT,
+            status  TEXT,
+            color   TEXT
         )
-    return render("index.html")
+    """)
 
-# ----- Reports -----
-@app.get("/reports")
+    # 보고서 테이블
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date    TEXT NOT NULL,      -- YYYY-MM-DD
+            site    TEXT NOT NULL,
+            detail  TEXT NOT NULL,
+            manager TEXT,
+            status  TEXT,               -- 진행/완료/보류
+            note    TEXT
+        )
+    """)
+
+    # 샘플 데이터 (최초 1회)
+    cur.execute("SELECT COUNT(*) FROM events")
+    if cur.fetchone()[0] == 0:
+        today = dt.date.today()
+        sample_events = [
+            ("네트워크 점검 - A현장", str(today), None, "김담당", "A현장", "진행", color_for_manager("김담당")),
+            ("장비 교체 - B현장", str(today.replace(day=1)), str(today.replace(day=1)), "이담당", "B현장", "완료", color_for_manager("이담당")),
+            ("고객 CS - C현장", str(today + dt.timedelta(days=3)), None, "박담당", "C현장", "진행", color_for_manager("박담당")),
+        ]
+        cur.executemany(
+            "INSERT INTO events(title,start,end,manager,site,status,color) VALUES (?,?,?,?,?,?,?)",
+            sample_events
+        )
+
+    cur.execute("SELECT COUNT(*) FROM reports")
+    if cur.fetchone()[0] == 0:
+        sample_reports = [
+            (str(dt.date.today()), "A현장", "스위치 포트 불량 확인 및 교체.", "김담당", "진행", "추가 자재 요청"),
+            (str(dt.date.today() - dt.timedelta(days=1)), "B현장", "AP 펌웨어 업데이트 완료.", "이담당", "완료", ""),
+            (str(dt.date.today() + dt.timedelta(days=2)), "C현장", "고객 민원 대응: 무선 끊김 현상 진단 예정.", "박담당", "보류", "방문 일정 조율"),
+        ]
+        cur.executemany(
+            "INSERT INTO reports(date,site,detail,manager,status,note) VALUES (?,?,?,?,?,?)",
+            sample_reports
+        )
+
+    conn.commit()
+    conn.close()
+
+def get_report_managers():
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT manager FROM reports WHERE IFNULL(manager,'')<>'' ORDER BY manager")
+    rows = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+def get_event_managers():
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT manager FROM events WHERE IFNULL(manager,'')<>'' ORDER BY manager")
+    rows = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+init_db()
+
+# ---------- 라우팅 ----------
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return RedirectResponse(url="/calendar")
+
+# ========== 달력 ==========
+@app.get("/calendar", response_class=HTMLResponse)
+def calendar_page(request: Request):
+    managers = get_event_managers()
+    statuses = ["진행", "완료", "보류"]
+    return templates.TemplateResponse("calendar.html", {"request": request, "managers": managers, "statuses": statuses})
+
+@app.get("/api/events")
+def api_events(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    manager: Optional[str] = None,
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    site: Optional[str] = None
+):
+    conn = db(); cur = conn.cursor()
+    where, args = [], []
+
+    if start and end:
+        where.append("(date(start) < date(?) AND (end IS NULL OR date(end) >= date(?)))")
+        args += [end, start]
+    if manager:
+        where.append("manager=?"); args.append(manager)
+    if status:
+        where.append("status=?"); args.append(status)
+    if site:
+        where.append("site LIKE ?"); args.append(f"%{site}%")
+    if q:
+        where.append("(title LIKE ? OR site LIKE ?)"); args += [f"%{q}%", f"%{q}%"]
+
+    sql = "SELECT id,title,start,end,manager,site,status,color FROM events"
+    if where: sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY date(start)"
+    cur.execute(sql, args)
+    rows = cur.fetchall()
+    conn.close()
+
+    events = []
+    for r in rows:
+        events.append({
+            "id": r["id"],
+            "title": r["title"],
+            "start": r["start"],
+            "end": r["end"],
+            "color": r["color"] or color_for_manager(r["manager"]),
+            "extendedProps": {
+                "manager": r["manager"],
+                "site": r["site"],
+                "status": r["status"],
+            }
+        })
+    return JSONResponse(events)
+
+# ========== 현장관리보고서 ==========
+@app.get("/reports", response_class=HTMLResponse)
 def reports_list(
     request: Request,
-    q: Optional[str] = None,
     fdate: Optional[str] = None,
     tdate: Optional[str] = None,
     manager: Optional[str] = None,
     status: Optional[str] = None,
+    q: Optional[str] = None,
 ):
-    db = SessionLocal()
-    qry = db.query(Report)
-    if fdate:
-        qry = qry.filter(Report.date >= parse_date(fdate))
-    if tdate:
-        qry = qry.filter(Report.date <= parse_date(tdate))
-    if manager:
-        qry = qry.filter(Report.manager == manager)
-    if status:
-        qry = qry.filter(Report.status == status)
+    conn = db(); cur = conn.cursor()
+    where, args = [], []
+
+    if fdate: where.append("date(date) >= date(?)"); args.append(fdate)
+    if tdate: where.append("date(date) <= date(?)"); args.append(tdate)
+    if manager: where.append("manager = ?"); args.append(manager)
+    if status: where.append("status = ?"); args.append(status)
     if q:
-        like = f"%{q}%"
-        from sqlalchemy import or_
-        qry = qry.filter(
-            or_(Report.site.like(like), Report.detail.like(like), Report.note.like(like))
-        )
-    data = qry.order_by(Report.date.desc(), Report.id.desc()).all()
-    db.close()
+        where.append("(site LIKE ? OR detail LIKE ? OR IFNULL(note,'') LIKE ?)")
+        args += [f"%{q}%", f"%{q}%", f"%{q}%"]
 
-    # 템플릿 없으면 기본 HTML로라도 렌더
-    if not os.path.isfile(os.path.join("templates", "reports_list.html")):
-        rows = "".join(
-            f"<tr><td>{r.id}</td><td>{r.date:%Y-%m-%d}</td><td>{r.site}</td>"
-            f"<td>{r.detail}</td><td>{r.manager}</td><td>{r.status}</td>"
-            f"<td>{r.note or ''}</td></tr>"
-            for r in data
-        )
-        return HTMLResponse(
-            "<h2>현장관리보고서</h2>"
-            '<p><a href="/reports/new">+ 새 보고서</a></p>'
-            f"<table border=1 cellpadding=6>"
-            f"<tr><th>ID</th><th>날짜</th><th>현장</th><th>CS내역</th>"
-            f"<th>담당자</th><th>상태</th><th>비고</th></tr>{rows}</table>"
-        )
+    sql = "SELECT id,date,site,detail,manager,status,note FROM reports"
+    if where: sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY date(date) DESC, id DESC"
 
-    return render(
-        "reports_list.html",
-        items=data,
-        managers=MANAGERS,
-        fdate=fdate or "",
-        tdate=tdate or "",
-        manager=manager or "",
-        status=status or "",
-        q=q or "",
-    )
+    cur.execute(sql, args)
+    items = [dict(r) for r in cur.fetchall()]
+    conn.close()
 
-@app.get("/reports/new", dependencies=[Depends(check_auth)])
-def reports_new():
-    today = date.today().strftime("%Y-%m-%d")
-    if not os.path.isfile(os.path.join("templates", "reports_form.html")):
-        # 템플릿 없을 때 간단 폼
-        options = "".join(f'<option value="{m}">{m}</option>' for m in MANAGERS)
-        return HTMLResponse(
-            "<h2>보고서 등록</h2>"
-            '<form method="post" action="/reports/new">'
-            f'<label>날짜 <input type="date" name="date_" value="{today}" required></label><br>'
-            '<label>현장이름 <input type="text" name="site" required></label><br>'
-            '<label>CS내역 <textarea name="detail" rows="6" required></textarea></label><br>'
-            f'<label>담당자 <select name="manager" required>{options}</select></label><br>'
-            '<label>상태 <select name="status">'
-            '<option>진행</option><option>완료</option><option>보류</option>'
-            '</select></label><br>'
-            '<label>비고 <input type="text" name="note"></label><br>'
-            '<button type="submit">등록</button>'
-            "</form>"
-        )
-    return render("reports_form.html", item=None, managers=MANAGERS, today=today, mode="new")
+    return templates.TemplateResponse("reports_list.html", {
+        "request": request,
+        "items": items,
+        "fdate": fdate or "",
+        "tdate": tdate or "",
+        "manager": manager or "",
+        "status": status or "",
+        "q": q or "",
+        "managers": get_report_managers(),
+    })
 
-@app.post("/reports/new", dependencies=[Depends(check_auth)])
-def reports_create(
-    date_: str = Form(...),
+@app.get("/reports/new", response_class=HTMLResponse)
+def reports_new_page(request: Request, date: Optional[str] = None):
+    data = {
+        "date": date or str(dt.date.today()),
+        "site": "", "detail": "", "manager": "", "status": "진행", "note": ""
+    }
+    return templates.TemplateResponse("reports_form.html", {"request": request, "mode": "new", "data": data})
+
+@app.post("/reports/new")
+def reports_new_submit(
+    date: str = Form(...),
     site: str = Form(...),
     detail: str = Form(...),
-    manager: str = Form(...),
-    status: str = Form("진행"),
-    note: str = Form(""),
+    manager: str = Form(None),
+    status: str = Form(None),
+    note: str = Form(None),
 ):
-    db = SessionLocal()
-    obj = Report(
-        date=parse_date(date_),
-        site=site.strip(),
-        detail=detail.strip(),
-        manager=manager.strip(),
-        status=status.strip(),
-        note=note.strip(),
+    conn = db(); cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO reports(date,site,detail,manager,status,note) VALUES (?,?,?,?,?,?)",
+        (date, site, detail, manager or "", status or "", note or "")
     )
-    db.add(obj)
-    db.commit()
-    db.close()
+    conn.commit(); conn.close()
     return RedirectResponse(url="/reports", status_code=303)
 
-@app.get("/reports/edit/{rid}", dependencies=[Depends(check_auth)])
-def reports_edit(rid: int):
-    db = SessionLocal()
-    item = db.query(Report).get(rid)
-    db.close()
-    if not item:
-        raise HTTPException(status_code=404, detail="Not found")
+@app.get("/reports/edit/{rid}", response_class=HTMLResponse)
+def reports_edit_page(request: Request, rid: int):
+    conn = db(); cur = conn.cursor()
+    cur.execute("SELECT id,date,site,detail,manager,status,note FROM reports WHERE id=?", (rid,))
+    row = cur.fetchone(); conn.close()
+    if not row:
+        return HTMLResponse("존재하지 않는 보고서입니다.", status_code=404)
+    return templates.TemplateResponse("reports_form.html", {"request": request, "mode": "edit", "data": dict(row)})
 
-    if not os.path.isfile(os.path.join("templates", "reports_form.html")):
-        options = "".join(
-            f'<option value="{m}" {"selected" if item.manager==m else ""}>{m}</option>'
-            for m in MANAGERS
-        )
-        return HTMLResponse(
-            f"<h2>보고서 수정 #{item.id}</h2>"
-            f'<form method="post" action="/reports/edit/{item.id}">'
-            f'<label>날짜 <input type="date" name="date_" value="{item.date:%Y-%m-%d}" required></label><br>'
-            f'<label>현장이름 <input type="text" name="site" value="{item.site}" required></label><br>'
-            f'<label>CS내역 <textarea name="detail" rows="6" required>{item.detail}</textarea></label><br>'
-            f'<label>담당자 <select name="manager" required>{options}</select></label><br>'
-            '<label>상태 <select name="status">'
-            f'<option {"selected" if item.status=="진행" else ""}>진행</option>'
-            f'<option {"selected" if item.status=="완료" else ""}>완료</option>'
-            f'<option {"selected" if item.status=="보류" else ""}>보류</option>'
-            '</select></label><br>'
-            f'<label>비고 <input type="text" name="note" value="{item.note or ""}"></label><br>'
-            '<button type="submit">저장</button>'
-            "</form>"
-        )
-
-    return render(
-        "reports_form.html",
-        item=item,
-        managers=MANAGERS,
-        today=item.date.strftime("%Y-%m-%d"),
-        mode="edit",
-    )
-
-@app.post("/reports/edit/{rid}", dependencies=[Depends(check_auth)])
-def reports_update(
+@app.post("/reports/edit/{rid}")
+def reports_edit_submit(
     rid: int,
-    date_: str = Form(...),
+    date: str = Form(...),
     site: str = Form(...),
     detail: str = Form(...),
-    manager: str = Form(...),
-    status: str = Form("진행"),
-    note: str = Form(""),
+    manager: str = Form(None),
+    status: str = Form(None),
+    note: str = Form(None),
 ):
-    db = SessionLocal()
-    item = db.query(Report).get(rid)
-    if not item:
-        db.close()
-        raise HTTPException(status_code=404, detail="Not found")
-    item.date = parse_date(date_)
-    item.site = site.strip()
-    item.detail = detail.strip()
-    item.manager = manager.strip()
-    item.status = status.strip()
-    item.note = note.strip()
-    db.commit()
-    db.close()
+    conn = db(); cur = conn.cursor()
+    cur.execute("""
+        UPDATE reports SET date=?, site=?, detail=?, manager=?, status=?, note=? WHERE id=?
+    """, (date, site, detail, manager or "", status or "", note or "", rid))
+    conn.commit(); conn.close()
     return RedirectResponse(url="/reports", status_code=303)
 
-@app.post("/reports/delete/{rid}", dependencies=[Depends(check_auth)])
+@app.post("/reports/delete/{rid}")
 def reports_delete(rid: int):
-    db = SessionLocal()
-    item = db.query(Report).get(rid)
-    if item:
-        db.delete(item)
-        db.commit()
-    db.close()
+    conn = db(); cur = conn.cursor()
+    cur.execute("DELETE FROM reports WHERE id=?", (rid,))
+    conn.commit(); conn.close()
     return RedirectResponse(url="/reports", status_code=303)
 
 @app.get("/reports/export")
-def reports_export(
-    q: Optional[str] = None,
+def reports_export_csv(
     fdate: Optional[str] = None,
     tdate: Optional[str] = None,
     manager: Optional[str] = None,
     status: Optional[str] = None,
-):
-    db = SessionLocal()
-    qry = db.query(Report)
-    if fdate:
-        qry = qry.filter(Report.date >= parse_date(fdate))
-    if tdate:
-        qry = qry.filter(Report.date <= parse_date(tdate))
-    if manager:
-        qry = qry.filter(Report.manager == manager)
-    if status:
-        qry = qry.filter(Report.status == status)
-    if q:
-        like = f"%{q}%"
-        from sqlalchemy import or_
-        qry = qry.filter(
-            or_(Report.site.like(like), Report.detail.like(like), Report.note.like(like))
-        )
-    data = qry.order_by(Report.date.asc(), Report.id.asc()).all()
-    db.close()
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["ID", "날짜", "현장이름", "CS내역", "담당자", "상태", "비고"])
-    for r in data:
-        writer.writerow(
-            [
-                r.id,
-                r.date.strftime("%Y-%m-%d"),
-                r.site,
-                r.detail,
-                r.manager,
-                r.status,
-                r.note or "",
-            ]
-        )
-    output.seek(0)
-    filename = f"reports_{fdate or 'all'}_{tdate or 'all'}.csv"
-    return StreamingResponse(
-        iter([output.getvalue().encode("utf-8-sig")]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-# ----- Schedule -----
-@app.get("/schedule")
-def schedule_list(
-    request: Request,
     q: Optional[str] = None,
-    fdate: Optional[str] = None,
-    tdate: Optional[str] = None,
-    manager: Optional[str] = None,
 ):
-    db = SessionLocal()
-    qry = db.query(Schedule)
-    if fdate:
-        qry = qry.filter(Schedule.date >= parse_date(fdate))
-    if tdate:
-        qry = qry.filter(Schedule.date <= parse_date(tdate))
-    if manager:
-        qry = qry.filter(Schedule.manager == manager)
+    conn = db(); cur = conn.cursor()
+    where, args = [], []
+    if fdate: where.append("date(date) >= date(?)"); args.append(fdate)
+    if tdate: where.append("date(date) <= date(?)"); args.append(tdate)
+    if manager: where.append("manager = ?"); args.append(manager)
+    if status: where.append("status = ?"); args.append(status)
     if q:
-        like = f"%{q}%"
-        from sqlalchemy import or_
-        qry = qry.filter(
-            or_(Schedule.title.like(like), Schedule.site.like(like), Schedule.memo.like(like))
-        )
-    data = qry.order_by(Schedule.date.desc(), Schedule.id.desc()).all()
-    db.close()
+        where.append("(site LIKE ? OR detail LIKE ? OR IFNULL(note,'') LIKE ?)")
+        args += [f"%{q}%", f"%{q}%", f"%{q}%"]
 
-    if not os.path.isfile(os.path.join("templates", "schedule_list.html")):
-        rows = "".join(
-            f"<tr><td>{s.id}</td><td>{s.date:%Y-%m-%d}</td><td>{s.title}</td>"
-            f"<td>{s.site or ''}</td><td>{s.manager}</td>"
-            f"<td>{(s.start_time or '')}~{(s.end_time or '')}</td>"
-            f"<td>{s.memo or ''}</td></tr>"
-            for s in data
-        )
-        return HTMLResponse(
-            "<h2>일정관리</h2>"
-            '<p><a href="/schedule/new">+ 새 일정</a></p>'
-            f"<table border=1 cellpadding=6>"
-            f"<tr><th>ID</th><th>날짜</th><th>일정명</th><th>현장</th>"
-            f"<th>담당자</th><th>시간</th><th>메모</th></tr>{rows}</table>"
-        )
+    sql = "SELECT id,date,site,detail,manager,status,note FROM reports"
+    if where: sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY date(date) DESC, id DESC"
 
-    return render(
-        "schedule_list.html",
-        items=data,
-        managers=MANAGERS,
-        fdate=fdate or "",
-        tdate=tdate or "",
-        manager=manager or "",
-        q=q or "",
+    cur.execute(sql, args)
+    rows = cur.fetchall()
+    conn.close()
+
+    lines = ["id,date,site,detail,manager,status,note"]
+    for r in rows:
+        vals = [str(r["id"]), r["date"], r["site"], r["detail"], r["manager"] or "", r["status"] or "", r["note"] or ""]
+        vals = [v.replace('"','""') for v in vals]
+        lines.append(",".join(f'"{v}"' for v in vals))
+    csv_bytes = ("\n".join(lines)).encode("utf-8-sig")
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":"attachment; filename=reports.csv"}
     )
 
-@app.get("/schedule/new", dependencies=[Depends(check_auth)])
-def schedule_new():
-    today = date.today().strftime("%Y-%m-%d")
-    if not os.path.isfile(os.path.join("templates", "schedule_form.html")):
-        options = "".join(f'<option value="{m}">{m}</option>' for m in MANAGERS)
-        return HTMLResponse(
-            "<h2>일정 등록</h2>"
-            '<form method="post" action="/schedule/new">'
-            f'<label>날짜 <input type="date" name="date_" value="{today}" required></label><br>'
-            '<label>일정명 <input type="text" name="title" required></label><br>'
-            '<label>현장 <input type="text" name="site"></label><br>'
-            f'<label>담당자 <select name="manager" required>{options}</select></label><br>'
-            '<label>시작시간 <input type="time" name="start_time"></label><br>'
-            '<label>종료시간 <input type="time" name="end_time"></label><br>'
-            '<label>메모 <input type="text" name="memo"></label><br>'
-            '<button type="submit">등록</button>'
-            "</form>"
-        )
-    return render("schedule_form.html", item=None, managers=MANAGERS, today=today, mode="new")
+# ========== 일정(이벤트) 작성/수정 ==========
+@app.get("/events/new", response_class=HTMLResponse)
+def events_new_page(request: Request, date: Optional[str] = None):
+    today = dt.date.today()
+    data = {
+        "title": "",
+        "start": date or str(today),
+        "end": "",
+        "manager": "",
+        "site": "",
+        "status": "진행",
+    }
+    return templates.TemplateResponse("events_form.html", {"request": request, "mode": "new", "data": data})
 
-@app.post("/schedule/new", dependencies=[Depends(check_auth)])
-def schedule_create(
-    date_: str = Form(...),
+@app.post("/events/new")
+def events_new_submit(
     title: str = Form(...),
-    site: str = Form(""),
-    manager: str = Form(...),
-    start_time: str = Form(""),
-    end_time: str = Form(""),
-    memo: str = Form(""),
+    start: str = Form(...),
+    end: str = Form(None),
+    manager: str = Form(None),
+    site: str = Form(None),
+    status: str = Form(None),
 ):
-    db = SessionLocal()
-    obj = Schedule(
-        date=parse_date(date_),
-        title=title.strip(),
-        site=site.strip(),
-        manager=manager.strip(),
-        start_time=start_time.strip(),
-        end_time=end_time.strip(),
-        memo=memo.strip(),
+    conn = db(); cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO events(title,start,end,manager,site,status,color)
+        VALUES (?,?,?,?,?,?,?)
+        """,
+        (
+            title.strip(),
+            start.strip(),
+            (end or "").strip() or None,
+            (manager or "").strip() or None,
+            (site or "").strip() or None,
+            (status or "").strip() or None,
+            color_for_manager(manager),
+        ),
     )
-    db.add(obj)
-    db.commit()
-    db.close()
-    return RedirectResponse(url="/schedule", status_code=303)
+    conn.commit(); conn.close()
+    return RedirectResponse(url="/calendar", status_code=303)
 
-@app.get("/schedule/edit/{sid}", dependencies=[Depends(check_auth)])
-def schedule_edit(sid: int):
-    db = SessionLocal()
-    item = db.query(Schedule).get(sid)
-    db.close()
-    if not item:
-        raise HTTPException(status_code=404, detail="Not found")
+@app.get("/events/edit/{eid}", response_class=HTMLResponse)
+def events_edit_page(request: Request, eid: int):
+    conn = db(); cur = conn.cursor()
+    cur.execute("SELECT id,title,start,end,manager,site,status FROM events WHERE id=?", (eid,))
+    row = cur.fetchone(); conn.close()
+    if not row:
+        return HTMLResponse("존재하지 않는 일정입니다.", status_code=404)
+    return templates.TemplateResponse("events_form.html", {"request": request, "mode": "edit", "data": dict(row)})
 
-    if not os.path.isfile(os.path.join("templates", "schedule_form.html")):
-        options = "".join(
-            f'<option value="{m}" {"selected" if item.manager==m else ""}>{m}</option>'
-            for m in MANAGERS
-        )
-        return HTMLResponse(
-            f"<h2>일정 수정 #{item.id}</h2>"
-            f'<form method="post" action="/schedule/edit/{item.id}">'
-            f'<label>날짜 <input type="date" name="date_" value="{item.date:%Y-%m-%d}" required></label><br>'
-            f'<label>일정명 <input type="text" name="title" value="{item.title}" required></label><br>'
-            f'<label>현장 <input type="text" name="site" value="{item.site or ""}"></label><br>'
-            f'<label>담당자 <select name="manager" required>{options}</select></label><br>'
-            f'<label>시작시간 <input type="time" name="start_time" value="{item.start_time or ""}"></label><br>'
-            f'<label>종료시간 <input type="time" name="end_time" value="{item.end_time or ""}"></label><br>'
-            f'<label>메모 <input type="text" name="memo" value="{item.memo or ""}"></label><br>'
-            '<button type="submit">저장</button>'
-            "</form>"
-        )
-
-    return render(
-        "schedule_form.html",
-        item=item,
-        managers=MANAGERS,
-        today=item.date.strftime("%Y-%m-%d"),
-        mode="edit",
-    )
-
-@app.post("/schedule/edit/{sid}", dependencies=[Depends(check_auth)])
-def schedule_update(
-    sid: int,
-    date_: str = Form(...),
+@app.post("/events/edit/{eid}")
+def events_edit_submit(
+    eid: int,
     title: str = Form(...),
-    site: str = Form(""),
-    manager: str = Form(...),
-    start_time: str = Form(""),
-    end_time: str = Form(""),
-    memo: str = Form(""),
+    start: str = Form(...),
+    end: str = Form(None),
+    manager: str = Form(None),
+    site: str = Form(None),
+    status: str = Form(None),
 ):
-    db = SessionLocal()
-    item = db.query(Schedule).get(sid)
-    if not item:
-        db.close()
-        raise HTTPException(status_code=404, detail="Not found")
-    item.date = parse_date(date_)
-    item.title = title.strip()
-    item.site = site.strip()
-    item.manager = manager.strip()
-    item.start_time = start_time.strip()
-    item.end_time = end_time.strip()
-    item.memo = memo.strip()
-    db.commit()
-    db.close()
-    return RedirectResponse(url="/schedule", status_code=303)
+    conn = db(); cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE events
+           SET title=?,
+               start=?,
+               end=?,
+               manager=?,
+               site=?,
+               status=?,
+               color=?
+         WHERE id=?
+        """,
+        (
+            title.strip(),
+            start.strip(),
+            (end or "").strip() or None,
+            (manager or "").strip() or None,
+            (site or "").strip() or None,
+            (status or "").strip() or None,
+            color_for_manager(manager),
+            eid,
+        ),
+    )
+    conn.commit(); conn.close()
+    return RedirectResponse(url="/calendar", status_code=303)
 
-@app.post("/schedule/delete/{sid}", dependencies=[Depends(check_auth)])
-def schedule_delete(sid: int):
-    db = SessionLocal()
-    item = db.query(Schedule).get(sid)
-    if item:
-        db.delete(item)
-        db.commit()
-    db.close()
-    return RedirectResponse(url="/schedule", status_code=303)
+@app.post("/events/delete/{eid}")
+def events_delete(eid: int):
+    conn = db(); cur = conn.cursor()
+    cur.execute("DELETE FROM events WHERE id=?", (eid,))
+    conn.commit(); conn.close()
+    return RedirectResponse(url="/calendar", status_code=303)
 
-@app.get("/")
-def index_calendar():
-    return render("index.html", MANAGERS=MANAGERS)
-
-@app.get("/calendar")
-def calendar_page():
-    return render("index.html", MANAGERS=MANAGERS)
-
-@app.get("/api/schedule")
-def api_schedule(fdate: Optional[str] = None, tdate: Optional[str] = None, manager: Optional[str] = None, q: Optional[str] = None):
-    db = SessionLocal()
-    qry = db.query(Schedule)
-    if fdate:
-        qry = qry.filter(Schedule.date >= parse_date(fdate))
-    if tdate:
-        qry = qry.filter(Schedule.date <= parse_date(tdate))
-    if manager:
-        qry = qry.filter(Schedule.manager == manager)
-    if q:
-        like = f"%{q}%"
-        from sqlalchemy import or_
-        qry = qry.filter(or_(Schedule.title.like(like), Schedule.site.like(like), Schedule.memo.like(like)))
-    items = qry.order_by(Schedule.date.asc()).all()
-    db.close()
-    data = [
-        {
-            "id": s.id,
-            "date": s.date.strftime("%Y-%m-%d"),
-            "title": s.title,
-            "site": s.site or "",
-            "manager": s.manager,
-            "start_time": s.start_time or "",
-            "end_time": s.end_time or "",
-            "memo": s.memo or "",
-        }
-        for s in items
-    ]
-    return JSONResponse(data)
-
-@app.get("/docs")
-def docs_list():
-    # 최소 페이지(추후 업로드/버전관리 붙일 자리)
-    return render("docs_list.html")
-
-# --------------- run tip ---------------
-# uvicorn app:app --host 0.0.0.0 --port 8000
+# (디버그용) 등록된 라우트 확인
+@app.get("/_routes")
+def list_routes():
+    routes = []
+    for r in app.router.routes:
+        path = getattr(r, "path", None)
+        methods = sorted(getattr(r, "methods", []) or [])
+        if path:
+            routes.append({"path": path, "methods": methods})
+    return JSONResponse(routes)

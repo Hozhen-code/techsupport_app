@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block head_extra %}
+  <!-- FullCalendar CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/@fullcalendar/core@6.1.15/index.css">
+  <link rel="stylesheet" href="https://unpkg.com/@fullcalendar/daygrid@6.1.15/index.css">
+{% endblock %}
+
+{% block content %}
+  <section class="calendar-page">
+    <h2>달력</h2>
+
+    <!-- 필터 툴바 -->
+    <div class="toolbar">
+      <div class="row">
+        <select id="f-manager">
+          <option value="">담당자(전체)</option>
+          {% for m in managers %}
+            <option value="{{m}}">{{m}}</option>
+          {% endfor %}
+        </select>
+        <select id="f-status">
+          <option value="">상태(전체)</option>
+          {% for s in statuses %}
+            <option value="{{s}}">{{s}}</option>
+          {% endfor %}
+        </select>
+        <input id="f-site" type="text" placeholder="현장 검색" />
+        <input id="f-q" type="text" placeholder="제목/현장 키워드" />
+        <button id="btn-filter">필터 적용</button>
+        <a id="btn-export" class="btn-outline" href="#">CSV 내보내기</a>
+        <a class="btn-primary" href="/events/new">+ 새 일정</a>
+      </div>
+    </div>
+
+    <div id="calendar" class="calendar-wrap"></div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <!-- FullCalendar JS -->
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+  <script>
+    function currentFilters() {
+      return {
+        manager: document.getElementById('f-manager').value,
+        status:  document.getElementById('f-status').value,
+        site:    document.getElementById('f-site').value,
+        q:       document.getElementById('f-q').value,
+      };
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      const el = document.getElementById('calendar');
+      const calendar = new FullCalendar.Calendar(el, {
+        initialView: 'dayGridMonth',
+        locale: 'ko',
+        firstDay: 0,
+        height: 'auto',
+        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,dayGridWeek,dayGridDay' },
+        events: {
+          url: '/api/events',
+          method: 'GET',
+          extraParams: () => currentFilters()
+        },
+        dayMaxEventRows: true,
+        eventClick: function(info) {
+          // 이벤트 클릭 → 수정 페이지로
+          window.location.href = '/events/edit/' + info.event.id;
+        },
+        dateClick: function(info) {
+          // 날짜 클릭 → 생성 폼으로
+          window.location.href = '/events/new?date=' + info.dateStr;
+        }
+      });
+      calendar.render();
+
+      document.getElementById('btn-filter').addEventListener('click', () => {
+        calendar.refetchEvents();
+      });
+
+      // CSV 내보내기 링크에 현재 필터를 쿼리로 반영
+      function updateExportHref(){
+        const f = currentFilters();
+        const params = new URLSearchParams(f);
+        // 달력의 현재 범위를 CSV에도 동일 반영(선택)
+        const range = calendar.view.getCurrentData().dateProfile.currentRange;
+        params.set('start', range.start.toISOString().slice(0,10));
+        params.set('end',   range.end.toISOString().slice(0,10));
+        document.getElementById('btn-export').href = '/events/export?' + params.toString();
+      }
+      updateExportHref();
+      // 네비게이션할 때마다 export 링크 갱신
+      calendar.on('datesSet', updateExportHref);
+      document.getElementById('btn-filter').addEventListener('click', updateExportHref);
+    });
+  </script>
+{% endblock %}

@@ -3,53 +3,76 @@
 <section class="reports-page">
   <h2>현장관리보고서</h2>
 
+  <!-- 검색/필터 -->
   <form method="get" class="filter">
     <input type="date" name="fdate" value="{{ fdate }}" />
     <input type="date" name="tdate" value="{{ tdate }}" />
+
     <select name="manager">
       <option value="">담당자(전체)</option>
       {% for m in managers %}
         <option value="{{m}}" {% if manager==m %}selected{% endif %}>{{m}}</option>
       {% endfor %}
     </select>
+
     <select name="status">
       <option value="">상태(전체)</option>
       {% for s in ["진행","완료","보류"] %}
         <option value="{{s}}" {% if status==s %}selected{% endif %}>{{s}}</option>
       {% endfor %}
     </select>
+
     <input type="text" name="q" value="{{ q }}" placeholder="현장/내역/비고 검색" />
-    <button type="submit">검색</button>
-    <a class="btn" href="/reports/export?fdate={{fdate}}&tdate={{tdate}}&manager={{manager}}&status={{status}}&q={{q}}">CSV 내보내기</a>
+
+    <!-- 검색 버튼: type 명시 + 버튼 스타일 통일 -->
+    <button type="submit" class="btn primary">검색</button>
+
+    <!-- 우측 액션 -->
+    <a class="btn outline" href="/reports/export?fdate={{fdate}}&tdate={{tdate}}&manager={{manager}}&status={{status}}&q={{q}}">CSV 내보내기</a>
     <a class="btn primary" href="/reports/new">+ 새 보고서</a>
   </form>
 
-  <table class="table">
-    <thead>
-      <tr>
-        <th>ID</th><th>날짜</th><th>현장이름</th><th>CS내역</th>
-        <th>담당자</th><th>상태</th><th>비고</th><th></th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for r in items %}
-      <tr>
-        <td>{{ r.id }}</td>
-        <td>{{ r.date.strftime("%Y-%m-%d") }}</td>
-        <td>{{ r.site }}</td>
-        <td class="pre">{{ r.detail }}</td>
-        <td>{{ r.manager }}</td>
-        <td>{{ r.status }}</td>
-        <td>{{ r.note or "" }}</td>
-        <td>
-          <a href="/reports/edit/{{ r.id }}">수정</a>
-          <form method="post" action="/reports/delete/{{ r.id }}" style="display:inline" onsubmit="return confirm('삭제할까요?');">
-            <button type="submit">삭제</button>
-          </form>
-        </td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <!-- 목록 -->
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>날짜</th>
+          <th>현장이름</th>
+          <th>CS내역</th>
+          <th>담당자</th>
+          <th>상태</th>
+          <th>비고</th>
+          <th style="width:160px">작업</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in items %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td>{{ r.date }}</td>
+          <td>{{ r.site }}</td>
+          <td class="pre">{{ r.detail }}</td>
+          <td>{{ r.manager }}</td>
+          <td>{{ r.status }}</td>
+          <td>{{ r.note or "" }}</td>
+          <td>
+            <div class="actions">
+              <a href="/reports/edit/{{ r.id }}" class="btn btn-success btn-sm">수정</a>
+              <form method="post" action="/reports/delete/{{ r.id }}" onsubmit="return confirm('삭제할까요?');">
+                <button type="submit" class="btn btn-danger btn-sm">삭제</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="8" class="empty">데이터가 없습니다.</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

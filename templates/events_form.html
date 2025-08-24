@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="form-page">
+  <h2>{{ "새 일정" if mode=="new" else "일정 수정" }}</h2>
+
+  <form method="post" class="form">
+    <div class="grid">
+      <label>제목
+        <input type="text" name="title" value="{{ data.title }}" required>
+      </label>
+      <label>시작일(또는 시작일시)
+        <input type="text" name="start" value="{{ data.start }}" placeholder="YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM" required>
+      </label>
+      <label>종료일(선택)
+        <input type="text" name="end" value="{{ data.end or '' }}" placeholder="YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM">
+      </label>
+      <label>담당자
+        <input type="text" name="manager" value="{{ data.manager }}">
+      </label>
+      <label>현장
+        <input type="text" name="site" value="{{ data.site }}">
+      </label>
+      <label>상태
+        <select name="status">
+          {% for s in ["진행","완료","보류"] %}
+            <option value="{{s}}" {% if data.status==s %}selected{% endif %}>{{s}}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>색상(선택)
+        <input type="color" name="color" value="{{ data.color or '' }}">
+      </label>
+    </div>
+
+    <div class="actions">
+      <a class="btn" href="/calendar">← 돌아가기</a>
+      {% if mode == "edit" %}
+      <button class="btn-danger" form="del" type="submit">삭제</button>
+      {% endif %}
+      <button class="btn-primary" type="submit">{{ "저장" }}</button>
+    </div>
+  </form>
+
+  {% if mode == "edit" %}
+  <form id="del" method="post" action="/events/delete/{{ data.id }}" onsubmit="return confirm('삭제할까요?')"></form>
+  {% endif %}
+</section>
+{% endblock %}

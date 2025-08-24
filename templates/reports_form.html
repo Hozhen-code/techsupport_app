@@ -1,24 +1,45 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>보고서 {{ "등록" if mode=="new" else "수정" }}</h2>
-<form method="post" class="form">
-  <label>날짜 <input type="date" name="date_" value="{{ today }}" required></label>
-  <label>현장이름 <input type="text" name="site" value="{{ item.site if item else '' }}" required></label>
-  <label>CS내역 <textarea name="detail" rows="6" required>{{ item.detail if item else '' }}</textarea></label>
-  <label>담당자
-    <select name="manager" required>
-      {% for m in managers %}<option value="{{m}}" {% if item and item.manager==m %}selected{% endif %}>{{m}}</option>{% endfor %}
-    </select>
-  </label>
-  <label>상태
-    <select name="status">
-      {% for s in ["진행","완료","보류"] %}<option value="{{s}}" {% if item and item.status==s %}selected{% endif %}>{{s}}</option>{% endfor %}
-    </select>
-  </label>
-  <label>비고 <input type="text" name="note" value="{{ item.note if item else '' }}"></label>
-  <div class="actions">
-    <button type="submit">{{ "등록" if mode=="new" else "저장" }}</button>
-    <a class="btn" href="/reports">취소</a>
-  </div>
-</form>
+<section class="form-page">
+  <h2>{{ "새 보고서" if mode=="new" else "보고서 수정" }}</h2>
+
+  <form method="post" class="form">
+    <div class="grid">
+      <label>날짜
+        <input type="date" name="date" value="{{ data.date }}" required>
+      </label>
+      <label>현장이름
+        <input type="text" name="site" value="{{ data.site }}" required>
+      </label>
+      <label class="full">CS내역
+        <textarea name="detail" rows="6" required>{{ data.detail }}</textarea>
+      </label>
+      <label>담당자
+        <input type="text" name="manager" value="{{ data.manager }}">
+      </label>
+      <label>상태
+        <select name="status">
+          {% for s in ["진행","완료","보류"] %}
+            <option value="{{s}}" {% if data.status==s %}selected{% endif %}>{{s}}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="full">비고
+        <input type="text" name="note" value="{{ data.note }}">
+      </label>
+    </div>
+
+    <div class="actions">
+      <a class="btn" href="/reports">← 목록</a>
+      {% if mode=="edit" %}
+      <button class="btn danger" form="del" type="submit">삭제</button>
+      {% endif %}
+      <button class="btn primary" type="submit">저장</button>
+    </div>
+  </form>
+
+  {% if mode=="edit" %}
+  <form id="del" method="post" action="/reports/delete/{{ data.id }}" onsubmit="return confirm('삭제할까요?')"></form>
+  {% endif %}
+</section>
 {% endblock %}

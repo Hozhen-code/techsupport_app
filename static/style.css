@@ -1,607 +1,210 @@
-/******************************************************
- * 기술지원 전산처리시스템 - 스타일 가이드 (주석 풍부한 버전)
- * 전체 레이아웃 중앙 정렬 + 우측 패널 높이 달력에 맞춤 포함
- ******************************************************/
-
-/* ===== 공통 변수: 여기 숫자만 바꾸면 전체 규격 변경 ===== */
-:root {
-  /* 레이아웃 */
-  --sidebar-width: 240px;           /* 좌측 사이드바 폭 */
-  --content-max-width: 1200px;      /* 본문 최대 폭 (컨텐츠) */
-
-  /* 좌측 달력 + 우측 패널 2열 */
-  --calendar-min-width: 1000px;     /* 달력 최소 폭(좌측 컬럼 고정폭) */
-  --right-panel-width: 1000px;       /* 우측 패널 폭(우측 컬럼 고정폭) */
-  --grid-gap: 24px;                 /* 두 컬럼 사이 간격 */
-
-  /* 달력 격자 규격 */
-  --cell-height: 150px;             /* 달력 셀(일) 높이 */
-  --cell-gap: 8px;                  /* 셀/행 간격 */
-  --cell-radius: 14px;              /* 셀 모서리 */
-  --cell-padding: 8px;              /* 셀 내부 여백 */
-  --weekday-head-padding: 8px;      /* 요일 헤더 여백 */
-  --daynum-margin-bottom: 6px;      /* 날짜 숫자 아래 여백 */
-  --muted-opacity: 0.45;            /* 이전/다음달 흐림 강도(0~1) */
-
-  /* 오늘 강조 */
-  --today-ring-color: #2563eb;
-  --today-ring-thickness: 2px;
-  --today-ring-alpha: 0.13;
-
-  /* 버튼/입력 규격 */
-  --control-padding-y: 8px;
-  --control-padding-x: 12px;
-  --control-radius: 10px;
-
-  /* 이벤트 점(도트) */
-  --dot-size: 16px;                 /* 점 지름 */
-  --dot-gap: 8px;                   /* 점 간격 */
-  --dot-border: 3px;                /* 점 테두리 두께 */
-  --legend-dot-size: 10px;          /* 범례 점 지름 */
-  --legend-dot-border: 2px;         /* 범례 점 테두리 두께 */
-
-  /* 담당자 색상 팔레트(12색 순환) */
-  --mgr-0:  #2563eb; --mgr-0-bg:  #e8efff;
-  --mgr-1:  #16a34a; --mgr-1-bg:  #e6f6ea;
-  --mgr-2:  #f59e0b; --mgr-2-bg:  #fff3e0;
-  --mgr-3:  #dc2626; --mgr-3-bg:  #ffe9e9;
-  --mgr-4:  #7c3aed; --mgr-4-bg:  #efe7ff;
-  --mgr-5:  #06b6d4; --mgr-5-bg:  #e6fbff;
-  --mgr-6:  #10b981; --mgr-6-bg:  #e7fbf3;
-  --mgr-7:  #f43f5e; --mgr-7-bg:  #ffe8ee;
-  --mgr-8:  #a855f7; --mgr-8-bg:  #f3e8ff;
-  --mgr-9:  #0ea5e9; --mgr-9-bg:  #e6f5ff;
-  --mgr-10: #84cc16; --mgr-10-bg: #eef9df;
-  --mgr-11: #ef4444; --mgr-11-bg: #ffe9e9;
-}
-
-/* ===== 기본 리셋/타이포 ===== */
-*{ box-sizing: border-box; }
-body{
-  font-family: "Pretendard", system-ui, AppleSDGothicNeo, "Noto Sans KR", sans-serif;
+/* 최소 레이아웃 & 타이포 */
+* { box-sizing: border-box; }
+body {
   margin: 0;
-  background: #f7f7fb;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", Arial, sans-serif;
   color: #222;
+  background: #f7f7fb;
 }
 
-/* ===== 전체 레이아웃(사이드바 + 컨텐츠) ===== */
-.layout{
+/* 사이드바 + 컨텐츠 2열 */
+.layout {
   display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
-  min-height: 80vh;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
 }
-.sidebar{
+.sidebar {
   background: #0f172a;
   color: #fff;
-  padding: 18px 14px;
-  display: flex; flex-direction: column; gap: 16px;
+  padding: 16px 12px;
 }
-.brand{ font-weight: 700; }
-.menu{ display: flex; flex-direction: column; gap: 10px; }
-.menu a{
+.brand { font-weight: 700; margin-bottom: 12px; }
+.menu { display: flex; flex-direction: column; gap: 8px; }
+.menu a {
   color: #fff; text-decoration: none;
   padding: 8px 10px; border-radius: 10px;
 }
-.menu a:hover{ background: #1e293b; }
+.menu a:hover { background: #1e293b; }
 
-/* 컨텐츠 영역은 가운데 정렬(좌우 auto) */
-.content{
-  padding: 80px;
-  max-width: var(--content-max-width);
-  max-width: none !important;  /* ← 1200px 제한 해제 */
-  margin: 0;
+.content {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto; /* 화면 가운데 배치 */
 }
-
-.footer{
+.footer {
+  grid-column: 1 / -1;
   padding: 12px 16px; text-align: center;
   color: #666; background: #f1f3f8;
 }
-h1,h2{ margin: 8px 0 16px; }
 
-/* ===== 공통 컨트롤(버튼/인풋) ===== */
-.btn,button{
-  padding: var(--control-padding-y) var(--control-padding-x);
-  border: 1px solid #c9c9dd;
-  border-radius: var(--control-radius);
-  background: #fff;
-  cursor: pointer;
-}
-.btn.primary,button[type=submit]{ background:#2563eb; color:#fff; border-color:#2563eb; }
-input,select,textarea{
-  padding: var(--control-padding-y);
-  border: 1px solid #d7d7e6;
-  border-radius: var(--control-radius);
-  background: #fff;
-}
-
-/* ===== 달력 페이지 2열 =====
-   - 고정폭 2열로 만들고 페이지 폭을 ‘합계’로 제한 → margin:auto로 중앙 배치
-   - align-items:stretch 로 두 컬럼 높이를 맞춤(우측 패널이 달력 높이에 맞춰 늘어남)
-*/
-.calendar-page{
-  display: grid;
-  grid-template-columns: var(--calendar-min-width) var(--right-panel-width);
-  column-gap: var(--grid-gap);
-  align-items: stretch; /* ← 두 컬럼 높이 동일하게 */
-  max-width: calc(var(--calendar-min-width) + var(--right-panel-width) + var(--grid-gap));
-  margin-left: auto; margin-right: auto; /* ← 페이지 중앙 정렬 */
-}
-
-/* 달력 래퍼가 그리드 컬럼 폭과 일치하도록 보장 */
-.calendar-wrap{ width: var(--calendar-min-width); }
-
-/* 화면이 충분히 좁아지면 1열로 전환 */
-@media (max-width: 1200px){
-  .calendar-page{
-    grid-template-columns: 1fr;
-    max-width: none; /* 모바일에서는 폭 제한 해제 */
-  }
-  .calendar-wrap{ width: 100%; }
-}
-
-/* ===== 달력 상단 컨트롤 ===== */
-.calendar-controls{
-  display:flex; align-items:center; gap:10px;
-  flex-wrap:wrap; margin-bottom:12px;
-}
-.month-label{ font-weight:700; min-width:120px; text-align:center; }
-.calendar-filters{ display:flex; gap:8px; align-items:center; }
-
-/* ===== 달력 그리드 ===== */
-.calendar-grid{ display:flex; flex-direction:column; gap:var(--cell-gap); }
-.calendar-row{  display:grid; grid-template-columns:repeat(7,1fr); gap:var(--cell-gap); }
-
-.cell{
-  background:#fff;
-  border:1px solid #e6e6ef;
-  border-radius:var(--cell-radius);
-  padding:var(--cell-padding);
-}
-.cell.head{
-  background:#eef2ff;
-  font-weight:700;
-  text-align:center;
-  min-height:auto;
-  padding:var(--weekday-head-padding);
-}
-
-.cell.day{
-  min-height:var(--cell-height);
-  max-height:var(--cell-height);
-  display:flex; flex-direction:column;
-}
-.cell.day.muted{ opacity:var(--muted-opacity); }
-.cell.day.today{
-  border-color:var(--today-ring-color);
-  box-shadow:0 0 0 var(--today-ring-thickness)
-             rgba(37,99,235,var(--today-ring-alpha));
-}
-.daynum{ font-weight:700; margin-bottom:var(--daynum-margin-bottom); }
-
-/* ===== 일정 표시: 텍스트 대신 색 점 ===== */
-.event-dots{
-  display:flex; flex-wrap:wrap;
-  gap:var(--dot-gap);
-  align-content:flex-start;
-  overflow:hidden; /* 셀 높이 넘어가면 잘라냄 */
-}
-.dot{
-  width:var(--dot-size);
-  height:var(--dot-size);
-  border-radius:50%;
-  display:inline-block;
-  border:var(--dot-border) solid transparent;
-}
-.more-count{ font-size:12px; color:#666; margin-left:6px; }
-
-/* ===== 담당자별 색상 매핑 ===== */
-.dot.mgr-0  { background:var(--mgr-0-bg);  border-color:var(--mgr-0);  }
-.dot.mgr-1  { background:var(--mgr-1-bg);  border-color:var(--mgr-1);  }
-.dot.mgr-2  { background:var(--mgr-2-bg);  border-color:var(--mgr-2);  }
-.dot.mgr-3  { background:var(--mgr-3-bg);  border-color:var(--mgr-3);  }
-.dot.mgr-4  { background:var(--mgr-4-bg);  border-color:var(--mgr-4);  }
-.dot.mgr-5  { background:var(--mgr-5-bg);  border-color:var(--mgr-5);  }
-.dot.mgr-6  { background:var(--mgr-6-bg);  border-color:var(--mgr-6);  }
-.dot.mgr-7  { background:var(--mgr-7-bg);  border-color:var(--mgr-7);  }
-.dot.mgr-8  { background:var(--mgr-8-bg);  border-color:var(--mgr-8);  }
-.dot.mgr-9  { background:var(--mgr-9-bg);  border-color:var(--mgr-9);  }
-.dot.mgr-10 { background:var(--mgr-10-bg); border-color:var(--mgr-10); }
-.dot.mgr-11 { background:var(--mgr-11-bg); border-color:var(--mgr-11); }
-
-/* ===== 색상 범례 ===== */
-.legend{
-  display:flex; flex-wrap:wrap; gap:12px; margin-top:10px;
-}
-.legend-item{ display:flex; align-items:center; gap:6px; color:#555; font-size:13px; }
-.legend .dot{
-  width:var(--legend-dot-size);
-  height:var(--legend-dot-size);
-  border-width:var(--legend-dot-border);
-}
-
-/* ===== 우측 패널 =====
-   - 그리드의 align-items:stretch와 함께 높이를 달력에 맞춰 늘림
-   - 내부 콘텐츠가 적어도 흰 박스는 전체 높이를 유지
-*/
-.right-panel{
-  background:#fff;
-  border:1px solid #e6e6ef;
-  border-radius:14px;
-  padding:14px;
-  padding-top: 10px !important;   /* 상단 여백 줄임 */
-  padding-bottom: 10px !important;/* 하단 여백 줄임 */
-  margin-top: 8px !important;     /* 필요시 줄이기 */
-  margin-bottom: 8px !important;
-  margin: auto 0;  
-}
-.panel-filter{
-  display:grid;
-  grid-template-columns:repeat(6,1fr);
-  gap:8px; margin-bottom:12px;
-}
-.panel-filter .btn{ grid-column:auto / span 1; }
-.panel-tip{
-  font-size:13px; color:#666;
-  background:#f7f8ff; border:1px dashed #cdd3ff;
-  border-radius:10px; padding:10px;
-}
-
-/* 모바일/협소 화면에서 패널 필터는 2열 */
-@media (max-width: 1200px){
-  .panel-filter{ grid-template-columns:repeat(2,1fr); }
-}
-
-/******************************************************
- * Reports page scoped styles (reports_list.html 전용)
- * - 칼럼 폭을 고정(width) 대신 min-width 중심으로 → 유연한 레이아웃
- * - ID/날짜는 좁게, 나머지는 내용에 따라 확장
- ******************************************************/
-
-/* 검색 필터 */
-.reports-page form.filter {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(140px, 1fr));
-  gap: 10px;
-  align-items: end;
-  margin-bottom: 16px;
-}
-@media (max-width: 1200px) {
-  .reports-page form.filter {
-    grid-template-columns: repeat(2, minmax(140px, 1fr));
-  }
-}
-.reports-page form.filter input[type="date"],
-.reports-page form.filter select,
-.reports-page form.filter input[type="text"] {
-  height: 40px;
-  font-size: 14px;
-}
-.reports-page form.filter button,
-.reports-page form.filter .btn {
-  height: 40px;
-  white-space: nowrap;
-}
-
-/* 테이블 기본 */
-.reports-page table.table {
-  width: 100%;
-  border-collapse: collapse;
+/* 달력 박스 */
+.calendar-page h2 { margin: 8px 0 16px; }
+.calendar-wrap {
   background: #fff;
   border: 1px solid #e6e6ef;
   border-radius: 12px;
-  overflow: hidden;
-  font-size: 14px;
+  padding: 12px;
+}
+/* ===== 툴바 / 버튼 ===== */
+.toolbar { 
+  background:#fff; border:1px solid #e6e6ef; border-radius:12px; padding:10px; margin-bottom:12px;
+}
+.toolbar .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.toolbar select, .toolbar input { height:36px; padding:6px 10px; border:1px solid #d7d7e6; border-radius:8px; }
+.toolbar button { height:36px; padding:0 12px; border:1px solid #c9c9dd; border-radius:8px; background:#fff; cursor:pointer; }
+.btn-primary { display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 12px; color:#fff; background:#2563eb; border:1px solid #2563eb; border-radius:8px; text-decoration:none; }
+.btn-outline { display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 12px; color:#2563eb; border:1px solid #2563eb; border-radius:8px; text-decoration:none; background:#fff; }
+.btn { display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 12px; border:1px solid #c9c9dd; border-radius:8px; background:#fff; text-decoration:none; color:#111; }
 
-  display: block;        /* 가로 스크롤 허용 */
-  overflow-x: auto;
+/* ===== 폼 페이지 ===== */
+.form-page h2 { margin: 8px 0 16px; }
+.form { background:#fff; border:1px solid #e6e6ef; border-radius:12px; padding:14px; }
+.form .grid { display:grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap:12px; }
+.form label { display:flex; flex-direction:column; gap:6px; font-weight:600; }
+.form input[type="text"], .form input[type="color"], .form select {
+  height:40px; border:1px solid #d7d7e6; border-radius:8px; padding:0 10px; font-weight:400;
 }
-.reports-page table.table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #f6f7fb;
-  font-weight: 700;
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 1px solid #e9e9f2;
-}
-.reports-page table.table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid #f0f0f6;
-  vertical-align: top;
-  color: #333;
-}
-.reports-page table.table tbody tr:nth-child(odd) { background: #fff; }
-.reports-page table.table tbody tr:nth-child(even) { background: #fafbff; }
-.reports-page table.table tbody tr:hover { background: #eef2ff; }
+.form .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+.btn-danger { display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 12px; color:#fff; background:#dc2626; border:1px solid #dc2626; border-radius:8px; text-decoration:none; }
 
-/* === 칼럼 폭 규칙 (수정) ===
-   - width 대신 min-width로 여유 확보
-   - 남는 공간은 자동으로 다른 칼럼이 가져감
-*/
-.reports-page table.table th,
-.reports-page table.table td {
-  min-width: 100px;   /* 기본 최소폭 */
+/* 좁은 화면 대응 */
+@media (max-width: 900px) {
+  .form .grid { grid-template-columns: 1fr; }
 }
 
-/* ID (좁게) */
-.reports-page table.table th:nth-child(1),
-.reports-page table.table td:nth-child(1) {
-  min-width: 50px;
-  max-width: 50px;
-  width: 60px;
-  text-align: center;
+/* ===== 공통 버튼 ===== */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:36px; padding:0 12px; border:1px solid #c9c9dd; border-radius:8px;
+  background:#fff; color:#111; text-decoration:none; cursor:pointer;
+}
+.btn.primary{ background:#2563eb; color:#fff; border-color:#2563eb; }
+.btn.outline{ color:#2563eb; border-color:#2563eb; background:#fff; }
+.btn.success{ background:#16a34a; color:#fff; border-color:#16a34a; text-decoration:none; }
+.btn.danger{ background:#dc2626; color:#fff; border-color:#dc2626; }
+.btn.sm{ height:30px; padding:0 10px; font-size:13px; border-radius:6px; }
+
+/* ===== 보고서: 필터 ===== */
+.reports-page h2{ margin:8px 0 12px;}
+.reports-page form.filter{
+  display:grid; grid-template-columns:repeat(8,minmax(140px,1fr));
+  gap:10px; align-items:end; margin-bottom:14px;
+}
+.reports-page form.filter input[type="date"],
+.reports-page form.filter input[type="text"],
+.reports-page form.filter select{ height:40px; border:1px solid #d7d7e6; border-radius:10px; padding:0 10px;}
+@media (max-width:1200px){
+  .reports-page form.filter{ grid-template-columns:repeat(2,minmax(140px,1fr)); }
 }
 
-/* 날짜 */
-.reports-page table.table th:nth-child(2),
-.reports-page table.table td:nth-child(2) {
-  min-width: 150px;
-  max-width: 150px;
-  text-align: center;
-}
+/* ===== 보고서: 표 ===== */
+.table-wrap{ background:#fff; border:1px solid #e6e6ef; border-radius:12px; overflow:hidden; }
+.table{ width:100%; border-collapse:collapse; font-size:14px; }
+.table.fixed{ table-layout:fixed; }
+.table thead th{ position:sticky; top:0; background:#f6f7fb; font-weight:700; text-align:left;
+  padding:10px 12px; border-bottom:1px solid #e9e9f2; }
+.table td{ padding:10px 12px; border-bottom:1px solid #f0f0f6; vertical-align:top; color:#333; }
+.table tbody tr:nth-child(even){ background:#fafbff; }
+.table tbody tr:hover{ background:#eef2ff; }
 
-/* 현장이름 */
-.reports-page table.table th:nth-child(3),
-.reports-page table.table td:nth-child(3) {
-  min-width: 300px;
-  max-width: 300px;
-  text-align: center;
-}
+/* 칼럼 폭(1920px 기준 적정치, 가로 스크롤 허용됨) */
+.col-id{ width:60px; text-align:center; }
+.col-date{ width:150px; text-align:center; }
+.col-site{ width:300px; }
+.col-detail{ width:600px; }
+.col-manager{ width:150px; text-align:center; }
+.col-status{ width:120px; text-align:center; }
+.col-note{ width:240px; }
+.col-actions{ width:180px; text-align:center; white-space:nowrap; }
 
-/* CS내역 */
-.reports-page table.table th:nth-child(4),
-.reports-page table.table td:nth-child(4) {
-  min-width: 1000px;
-  max-width: 1000px;
-  text-align: center;
-}
+/* 길이 처리 */
+.clip{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pre{ white-space:normal; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; line-height:1.6; max-height:4.8em; }
+.pre:hover{ -webkit-line-clamp:unset; max-height:400px; overflow:auto; background:#fff; border-radius:8px; box-shadow: inset 0 0 0 1px #e9e9f2; }
 
-/* 담당자 */
-.reports-page table.table th:nth-child(5),
-.reports-page table.table td:nth-child(5) {
-  min-width: 150px;
-  max-width: 150px;
-  text-align: center;
-}
+/* 상태 뱃지 */
+.badge{ display:inline-block; padding:4px 8px; border-radius:999px; font-weight:700; font-size:12px; }
+.badge.prog{ background:#eff6ff; color:#2563eb; }
+.badge.done{ background:#e6f6ea; color:#16a34a; }
+.badge.hold{ background:#fff3e0; color:#f59e0b; }
 
-/* 상태 */
-.reports-page table.table th:nth-child(6),
-.reports-page table.table td:nth-child(6) {
-  min-width: 150px;
-  max-width: 150px;
-  text-align: center;
+/* 폼 */
+.form-page h2{ margin:8px 0 12px; }
+.form{ background:#fff; border:1px solid #e6e6ef; border-radius:12px; padding:14px; }
+.form .grid{ display:grid; grid-template-columns: repeat(2,minmax(260px,1fr)); gap:12px; }
+.form .grid .full{ grid-column:1 / -1; }
+.form label{ display:flex; flex-direction:column; gap:6px; font-weight:600; }
+.form input[type="text"], .form input[type="date"], .form select, .form textarea{
+  border:1px solid #d7d7e6; border-radius:10px; padding:8px 10px; font-weight:400;
 }
+.form .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
 
-/* 액션(수정/삭제) */
-.reports-page table.table th:last-child,
-.reports-page table.table td:last-child {
-  min-width: 150px;
-  text-align: center;
-}
+.actions .btn{ text-decoration:none; }
 
-/* 비고 */
-.reports-page table.table th:nth-child(7),
-.reports-page table.table td:nth-child(7) {
-  min-width: 200px;
-  max-width: 200px;
-  text-align: center;
-}
-
-/* CS내역: 3줄 말줄임 + 호버시 펼침 */
-.reports-page table.table td.pre {
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  max-height: 4.8em;
-  line-height: 1.6;
-  cursor: help;
-}
-.reports-page table.table td.pre:hover {
-  -webkit-line-clamp: unset;
-  max-height: 400px;
-  overflow: auto;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px #e9e9f2;
-  padding-right: 8px;
-}
-
-/* 액션 버튼 */
-.reports-page table.table td:last-child { white-space: nowrap; }
-.reports-page table.table td:last-child a,
-.reports-page table.table td:last-child button {
-  display: inline-block;
-  margin-right: 6px;
-}
-.reports-page table.table td:last-child button {
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid #e1e1ec;
-  background: #fff;
-}
-.reports-page table.table td:last-child button:hover { background: #f6f7fb; }
-
-/* 상태 컬럼: 색 강조 가능 (기본은 연회색 배경) */
-.reports-page table.table td:nth-child(6) {
-  background: #f9fafc;
-  border-radius: 8px;
-  font-weight: 600;
-}
 
 /******************************************************
- * reports_list 개선: 격자선 + 액션버튼(수정/삭제) 스타일
+ * reports_list 개선(검색버튼/중앙정렬/수정·삭제 버튼)
  ******************************************************/
 
-/* 1) 테이블 격자선(세로 라인 추가) */
-.reports-page table.table thead th,
-.reports-page table.table td{
-  border-right: 2px solid #ececf5;           /* 세로선 */
+/* 검색 폼 레이아웃 + 버튼/컨트롤 높이 통일 */
+.reports-page .filter{
+  display:grid;
+  grid-template-columns: repeat(8, minmax(140px,1fr));
+  gap:10px; align-items:end; margin-bottom:16px;
 }
-.reports-page table.table thead th:last-child,
-.reports-page table.table td:last-child{
-  border-right: none;                         /* 마지막 칸은 외곽선과 겹치므로 제거 */
+@media (max-width:1200px){
+  .reports-page .filter{ grid-template-columns:repeat(2, minmax(140px,1fr)); }
 }
-
-/* 2) 액션 칼럼 버튼화: a=수정(초록), button=삭제(빨강) */
-.reports-page table.table td:last-child a,
-.reports-page table.table td:last-child button{
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 13px;
-  line-height: 1;
-  border: 1px solid transparent;
-  text-decoration: none;                      /* a 밑줄 제거 */
-  cursor: pointer;
-  transition: transform .02s ease, filter .15s ease;
-  box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+.reports-page .filter input[type="date"],
+.reports-page .filter select,
+.reports-page .filter input[type="text"],
+.reports-page .filter .btn{
+  height:40px; font-size:14px;
 }
 
-/* 수정 = 초록 */
-.reports-page table.table td:last-child a{
-  background: #16a34a;                        /* green-600 */
-  border-color: #16a34a;
-  color: #fff;
+/* 아웃라인 버튼(CSV용) */
+.btn.outline{
+  background:#fff; color:#2563eb; border:1px solid #2563eb;
 }
-.reports-page table.table td:last-child a:hover{
-  filter: brightness(0.95);
+.btn.outline:hover{ background:#eff6ff; }
+
+/* 표 전체 중앙정렬 + 세로 가운데 정렬 */
+.reports-page .table{ width:100%; border-collapse:collapse; background:#fff;
+  border:1px solid #e6e6ef; border-radius:12px; overflow:hidden; font-size:14px; }
+.reports-page .table th,
+.reports-page .table td{
+  text-align:center;                 /* ← 중앙 정렬 */
+  vertical-align:middle;             /* ← 세로 가운데 */
+  padding:10px 12px;
+  border-bottom:1px solid #f0f0f6;
 }
-.reports-page table.table td:last-child a:active{
-  transform: translateY(1px);
+.reports-page .table thead th{
+  background:#f6f7fb; font-weight:700; border-bottom:1px solid #e9e9f2;
+}
+.reports-page .table tbody tr:nth-child(even){ background:#fafbff; }
+.reports-page .table tbody tr:hover{ background:#eef2ff; }
+.reports-page .table .empty{ color:#999; }
+
+/* 길어지는 CS내역은 2~3줄로 보이고 호버시 펼침 */
+.reports-page .table td.pre{
+  white-space:normal; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+  overflow:hidden; max-height:4.8em; line-height:1.6; cursor:help;
+}
+.reports-page .table td.pre:hover{
+  -webkit-line-clamp:unset; max-height:400px; overflow:auto; background:#fff;
+  border-radius:8px; box-shadow:inset 0 0 0 1px #e9e9f2; padding-right:8px;
 }
 
-/* 삭제 = 빨강 */
-.reports-page table.table td:last-child button{
-  background: #dc2626;                        /* red-600 */
-  border-color: #dc2626;
-  color: #fff;
-}
-.reports-page table.table td:last-child button:hover{
-  filter: brightness(0.95);
-}
-.reports-page table.table td:last-child button:active{
-  transform: translateY(1px);
+/* 작업(수정/삭제) 버튼 정렬 */
+.reports-page .actions{
+  display:flex; justify-content:center; gap:8px; flex-wrap:wrap;
 }
 
-/* (선택) 액션 칼럼 간격 조금 확보 */
-.reports-page table.table td:last-child a,
-.reports-page table.table td:last-child button{
-  margin-right: 8px;
-}
-.reports-page table.table td:last-child a:last-child,
-.reports-page table.table td:last-child button:last-child{
-  margin-right: 0;
-}
+/* 스몰 버튼 + 색상(초록/빨강) */
+.btn-sm{ padding:6px 10px; font-size:13px; border-radius:8px; }
+.btn.btn-success{ background:#16a34a; border:1px solid #16a34a; color:#fff; }
+.btn.btn-success:hover{ filter:brightness(0.95); }
+.btn.btn-danger{ background:#dc2626; border:1px solid #dc2626; color:#fff; }
+.btn.btn-danger:hover{ filter:brightness(0.95); }
 
-/******************************************************
- * 상단 액션 버튼 스타일 (CSV 내보내기 / + 새 보고서)
- ******************************************************/
-
-/* 공통 버튼화: a 링크도 버튼처럼 보이게 */
-.reports-page form.filter a.btn,
-.reports-page form.filter button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 40px;                   /* 필터 높이와 동일 */
-  padding: 0 16px;
-  border-radius: 10px;
-  border: 1px solid #d1d5e8;
-  background: #fff;
-  color: #111;
-  font-weight: 600;
-  font-size: 14px;
-  text-decoration: none;           /* ← 밑줄 제거 */
-  box-shadow: 0 1px 0 rgba(0,0,0,0.04);
-  transition: filter .15s ease, transform .02s ease;
-}
-
-/* 호버/클릭 */
-.reports-page form.filter a.btn:hover,
-.reports-page form.filter button:hover { background: #f6f7fb; }
-.reports-page form.filter a.btn:active,
-.reports-page form.filter button:active { transform: translateY(1px); }
-
-/* 파란 기본(primary) → + 새 보고서 */
-.reports-page form.filter a.btn.primary {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
-}
-.reports-page form.filter a.btn.primary:hover { filter: brightness(0.95); }
-
-/* CSV 내보내기(윤곽/아웃라인 스타일) */
-.reports-page form.filter a.btn:not(.primary) {
-  border-color: #2563eb;
-  color: #2563eb;
-  background: #fff;
-}
-.reports-page form.filter a.btn:not(.primary):hover {
-  background: #eff6ff;
-}
-
-/******************************************************
- * reports_list 추가 개선
- * - 테이블 폭 고정(table-layout: fixed)
- * - 각 칼럼별 줄바꿈 / 말줄임 처리 규칙
- ******************************************************/
-
-/* 1) 테이블 폭 고정: 내용 길이에 따라 폭이 밀리지 않도록 */
-.reports-page table.table {
-  table-layout: fixed;   /* ← 칼럼 폭은 CSS width 기준으로 고정 */
-  word-wrap: break-word; /* 내용이 칼럼 안에서 줄바꿈되도록 */
-}
-
-/* 2) 공통: 긴 텍스트는 칼럼 안에서 처리 */
-.reports-page table.table th,
-.reports-page table.table td {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 3) ID, 날짜, 담당자, 상태, 액션 칼럼 → 말줄임(...) */
-.reports-page table.table td:nth-child(1),
-.reports-page table.table td:nth-child(2),
-.reports-page table.table td:nth-child(5),
-.reports-page table.table td:nth-child(6),
-.reports-page table.table td:last-child {
-  white-space: nowrap;        /* 줄바꿈 안함 */
-  text-overflow: ellipsis;    /* 넘치면 ... */
-}
-
-/* 4) 현장이름 / CS내역 / 비고 → 줄바꿈 허용 */
-.reports-page table.table td:nth-child(3),
-.reports-page table.table td:nth-child(4),
-.reports-page table.table td:nth-child(7) {
-  white-space: normal;        /* 여러 줄 허용 */
-  word-break: break-word;     /* 단어 단위로 줄바꿈 */
-  text-overflow: clip;        /* ... 대신 잘림 */
-}
-
-/* 5) CS내역(pre) 칼럼 → 기존 hover 펼침 효과 유지 */
-.reports-page table.table td.pre {
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  max-height: 4.8em;
-  line-height: 1.6;
-  cursor: help;
-}
-.reports-page table.table td.pre:hover {
-  -webkit-line-clamp: unset;
-  max-height: 400px;
-  overflow: auto;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px #e9e9f2;
-  padding-right: 8px;
-}
+/* 링크 밑줄 제거 안전장치 */
+.reports-page .actions a{ text-decoration:none; }
