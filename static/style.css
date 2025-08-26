@@ -14,7 +14,7 @@ body {
   min-height: 100vh;
 }
 .sidebar {
-  background: #0f172a;
+  background: #2b2c30;
   color: #fff;
   padding: 16px 12px;
 }
@@ -24,7 +24,7 @@ body {
   color: #fff; text-decoration: none;
   padding: 8px 10px; border-radius: 10px;
 }
-.menu a:hover { background: #1e293b; }
+.menu a:hover { background: #26282b; }
 
 .content {
   padding: 20px;

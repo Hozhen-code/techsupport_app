@@ -24,6 +24,20 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_ROOT), name="uploads")
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
 
+APP_LOGO_DEFAULT = "img/logo.png"
+
+def logo_src(request: Request) -> str:
+    val = os.getenv("APP_LOGO", APP_LOGO_DEFAULT).strip()
+    if val.startswith("http://") or val.startswith("https://") or val.startswith("//"):
+        return val                         # 절대 URL
+    if val.startswith("/"):
+        return val                         # /static/... 처럼 이미 절대 경로
+    # 그 외에는 static 하위 상대경로로 간주
+    return request.url_for("static", path=val)
+
+# Jinja2 전역 함수로 등록 → 템플릿에서 {{ logo_src(request) }} 로 사용
+templates.env.globals["logo_src"] = logo_src
+
 class AuthGuard(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path

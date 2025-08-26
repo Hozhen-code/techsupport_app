@@ -1,11 +1,24 @@
 {% block content %}
 <section class="page" style="max-width:440px;margin:40px auto;">
+
+  <!-- 로고 -->
+  <div style="display:flex;justify-content:center;align-items:center;margin-bottom:18px;">
+    <img
+      src="{{ logo_src(request) }}"
+      alt="회사 로고"
+      style="max-width:180px;height:auto;object-fit:contain;"
+      onerror="this.onerror=null;this.src='{{ url_for('static', path='img/logo.svg') }}';"
+    >
+  </div>
+
   <h2>로그인</h2>
+
   {% if error %}
     <div class="card" style="border-color:#1de1c7;color:#b91c1c;background:#fff1f2;margin-bottom:12px;">
       {{ error }}
     </div>
   {% endif %}
+
   <form method="post" action="/login" class="card" style="padding:16px;border:1px solid #e6e6ef;border-radius:12px;background:#fff;">
     <div class="row" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
       <label>아이디</label>

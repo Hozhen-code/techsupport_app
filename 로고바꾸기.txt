@@ -1,0 +1,7 @@
+$env:APP_LOGO = "img/logo.svg"   # 또는 "img/logo.png" / "https://example.com/logo.svg"
+uvicorn app:app --host 0.0.0.0 --port 8000
+
+set APP_LOGO=img/logo.svg
+uvicorn app:app --host 0.0.0.0 --port 8000
+
+$env:APP_LOGO = "https://your-cdn.com/company/logo.svg"
