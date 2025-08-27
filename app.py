@@ -1,275 +1,297 @@
 # app.py
-from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, Response
+from __future__ import annotations
+from fastapi import FastAPI, Request, Form, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import Route as StarletteRoute
-import sqlite3, os, shutil, hashlib, secrets
-import datetime as dt
-from typing import Optional, List
+import sqlite3, os, hashlib, secrets, datetime as dt
+from typing import Optional, List, Dict, Any
 
-app = FastAPI()
+# -----------------------------------------------------------------------------
+# 기본 설정
+# -----------------------------------------------------------------------------
+app = FastAPI(title="TechSupport (New DB)")
 
-# ===== Paths =====
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
-UPLOAD_ROOT = os.path.join(BASE_DIR, "uploads")
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 DB_PATH = os.path.join(BASE_DIR, "app.db")
 
-os.makedirs(UPLOAD_ROOT, exist_ok=True)
+os.makedirs(STATIC_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-app.mount("/uploads", StaticFiles(directory=UPLOAD_ROOT), name="uploads")
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
 
-APP_LOGO_DEFAULT = "img/logo.png"
-
-def logo_src(request: Request) -> str:
-    val = os.getenv("APP_LOGO", APP_LOGO_DEFAULT).strip()
-    if val.startswith("http://") or val.startswith("https://") or val.startswith("//"):
-        return val                         # 절대 URL
-    if val.startswith("/"):
-        return val                         # /static/... 처럼 이미 절대 경로
-    # 그 외에는 static 하위 상대경로로 간주
-    return request.url_for("static", path=val)
-
-# Jinja2 전역 함수로 등록 → 템플릿에서 {{ logo_src(request) }} 로 사용
-templates.env.globals["logo_src"] = logo_src
-
-class AuthGuard(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        path = request.url.path
-
-        # 화이트리스트: 로그인/정적/문서/진단 + .well-known
-        open_exact = {"/login", "/logout", "/favicon.ico", "/_whoami", "/_routes"}
-        open_prefix = ("/static", "/uploads", "/docs", "/redoc", "/openapi.json", "/.well-known")
-        if path in open_exact or any(path.startswith(p) for p in open_prefix):
-            return await call_next(request)
-
-        # ★ 여기서 request.session 을 직접 쓰지 말고 scope에서 안전하게 읽음
-        sess = request.scope.get("session") or {}
-        if sess.get("uid"):
-            return await call_next(request)
-
-        return RedirectResponse("/login", status_code=303)
-
-# ⬇️ 미들웨어 추가 순서 중요
-#   Starlette 는 "마지막에 add_middleware 한 것"이 가장 먼저 실행됩니다(가장 바깥).
-#   세션이 먼저 실행되어야 하므로 SessionMiddleware 를 **마지막에** 추가합니다.
-app.add_middleware(AuthGuard)
-
-app.add_middleware(
-    SessionMiddleware,
-    secret_key="change-this-to-a-long-random-secret",
-    session_cookie="session",   # 쿠키명 고정
-    https_only=False,
-    same_site="lax",
-    max_age=60 * 60 * 8,        # 8시간
-)
-
-# ===== Utilities =====
-def db():
+# -----------------------------------------------------------------------------
+# 유틸
+# -----------------------------------------------------------------------------
+def db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # 모든 연결에서 FK 강제
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
-def secure_filename(name: str) -> str:
-    keep = "._-()[]{}@~^+=,"
-    return "".join(ch for ch in name if ch.isalnum() or ch in keep)
+def now_local() -> str:
+    return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-COLORS = [
-    "#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#06b6d4",
-    "#10b981", "#f43f5e", "#a855f7", "#0ea5e9", "#84cc16", "#ef4444"
-]
-def color_for_manager(name: Optional[str]) -> Optional[str]:
-    if not name:
-        return None
-    h = 0
-    for ch in name:
-        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
-    return COLORS[h % len(COLORS)]
+def sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
-def color_palette():
-    return [
-        {"name": "빨", "hex": "#ef4444"},
-        {"name": "주", "hex": "#f59e0b"},
-        {"name": "노", "hex": "#facc15"},
-        {"name": "초", "hex": "#16a34a"},
-        {"name": "파", "hex": "#2563eb"},
-        {"name": "남", "hex": "#1e40af"},
-        {"name": "보", "hex": "#7c3aed"},
-    ]
+def has_table(cur: sqlite3.Cursor, name: str) -> bool:
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,))
+    return cur.fetchone() is not None
 
-# ===== DB init & migrations =====
-def init_db():
+def get_session_dict(request: Request) -> Dict[str, Any]:
+    # request.session을 직접 건드리면 SessionMiddleware 없을 때 assert가 터짐
+    s = request.scope.get("session")
+    return s if isinstance(s, dict) else {}
+
+def verify_password(plain: str, pw_hash: str, pw_salt: Optional[str]) -> bool:
+    """
+    pw_hash가 bcrypt 형태($2...)면 bcrypt로 검증(설치 시),
+    그 외에는 sha256(salt+password) 또는 sha256(password)로 검증
+    """
+    if not pw_hash:
+        return False
+    try:
+        if pw_hash.startswith("$2"):  # bcrypt
+            import bcrypt  # optional
+            return bcrypt.checkpw(plain.encode(), pw_hash.encode())
+    except Exception:
+        # bcrypt 미설치/에러 → 아래 sha256로 폴백
+        pass
+
+    if pw_salt:
+        return sha256_hex(pw_salt + plain) == pw_hash
+    else:
+        return sha256_hex(plain) == pw_hash
+
+# -----------------------------------------------------------------------------
+# 초기 시드 (DB 스키마는 이미 제공된 SQL로 만들었다고 가정)
+# 직원/권한/로그인 정보가 전혀 없으면 최소 관리자 계정 생성
+# -----------------------------------------------------------------------------
+def seed_minimum():
     conn = db()
     cur = conn.cursor()
 
-    def has_col(table: str, col: str) -> bool:
-        cur.execute(f"PRAGMA table_info({table})")
-        return any(r[1] == col for r in cur.fetchall())
+    # 필요한 핵심 테이블 존재 확인
+    needed = ["departments", "job_ranks", "roles", "employees", "employee_roles", "employee_auth"]
+    if not all(has_table(cur, t) for t in needed):
+        conn.close()
+        return  # 스키마 미구성 상태 → 아무것도 하지 않음
 
-    # events
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title   TEXT NOT NULL,
-            start   TEXT NOT NULL,
-            end     TEXT,
-            manager TEXT,
-            site    TEXT,
-            status  TEXT,
-            color   TEXT
-        )
-    """)
+    # 직원/계정이 하나도 없으면 시드
+    cur.execute("SELECT COUNT(*) FROM employees")
+    emp_count = cur.fetchone()[0] or 0
 
-    # reports
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date    TEXT NOT NULL,
-            site    TEXT NOT NULL,
-            detail  TEXT NOT NULL,
-            manager TEXT,
-            status  TEXT,
-            note    TEXT
-        )
-    """)
+    cur.execute("SELECT COUNT(*) FROM employee_auth")
+    auth_count = cur.fetchone()[0] or 0
 
-    # report_files
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS report_files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_id   INTEGER NOT NULL,
-            file_path   TEXT NOT NULL,
-            orig_name   TEXT NOT NULL,
-            content_type TEXT,
-            uploaded_at TEXT NOT NULL,
-            FOREIGN KEY(report_id) REFERENCES reports(id) ON DELETE CASCADE
-        )
-    """)
+    if emp_count == 0 and auth_count == 0:
+        # 1) 부서 HQ
+        cur.execute("INSERT INTO departments(dept_code, name, status) VALUES (?,?,?)",
+                    ("HQ", "본사", "active"))
+        cur.execute("SELECT dept_id FROM departments WHERE dept_code='HQ'")
+        dept_id = cur.fetchone()[0]
 
-    # sites
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS sites (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            address TEXT NOT NULL,
-            camera_count INTEGER,
-            db_server INTEGER,
-            ip TEXT,
-            server_location TEXT
-        )
-    """)
-    if not has_col("sites", "db_server"):
-        cur.execute("ALTER TABLE sites ADD COLUMN db_server INTEGER")
+        # 2) 직급/권한
+        cur.execute("INSERT INTO job_ranks(rank_code, name) VALUES (?,?)", ("ADMIN", "관리자"))
+        cur.execute("SELECT rank_id FROM job_ranks WHERE rank_code='ADMIN'")
+        rank_id = cur.fetchone()[0]
 
-    # forms
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS forms (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            purpose TEXT,
-            file_path TEXT,
-            orig_name TEXT,
-            content_type TEXT,
-            uploaded_at TEXT
-        )
-    """)
-    if not has_col("forms", "orig_name"):
-        cur.execute("ALTER TABLE forms ADD COLUMN orig_name TEXT")
-    if not has_col("forms", "content_type"):
-        cur.execute("ALTER TABLE forms ADD COLUMN content_type TEXT")
-    if not has_col("forms", "uploaded_at"):
-        cur.execute("ALTER TABLE forms ADD COLUMN uploaded_at TEXT")
+        # roles: ADMIN / MANAGER / STAFF
+        for code, nm in [("ADMIN", "관리자"), ("MANAGER", "매니저"), ("STAFF", "직원")]:
+            cur.execute("INSERT OR IGNORE INTO roles(role_code, name) VALUES (?,?)", (code, nm))
 
-    # users
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL,
-            role TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    if not has_col("users", "password_hash"):
-        cur.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
-    if not has_col("users", "salt"):
-        cur.execute("ALTER TABLE users ADD COLUMN salt TEXT")
-    if not has_col("users", "role"):
-        cur.execute("ALTER TABLE users ADD COLUMN role TEXT")
-    if not has_col("users", "created_at"):
-        cur.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
+        # 3) 직원 / 로그인
+        cur.execute("""
+            INSERT INTO employees(name, dept_id, rank_id, status)
+            VALUES (?,?,?, 'active')
+        """, ("관리자", dept_id, rank_id))
+        cur.execute("SELECT emp_id FROM employees WHERE name='관리자' ORDER BY emp_id DESC LIMIT 1")
+        emp_id = cur.fetchone()[0]
 
-    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
-    conn.commit()
+        # 직원 권한: ADMIN 부여
+        cur.execute("SELECT role_id FROM roles WHERE role_code='ADMIN'")
+        role_id = cur.fetchone()[0]
+        cur.execute("INSERT INTO employee_roles(emp_id, role_id) VALUES (?,?)", (emp_id, role_id))
 
-    # seed admin if empty
-    cur.execute("SELECT COUNT(*) FROM users")
-    if (cur.fetchone()[0] or 0) == 0:
+        # 로그인 생성 (sha256(salt+password))
         salt = secrets.token_hex(8)
-        pwd = "admin123!"
-        pw_hash = hashlib.sha256((salt + pwd).encode()).hexdigest()
-        cur.execute(
-            "INSERT INTO users(username, password_hash, salt, role) VALUES (?,?,?,?)",
-            ("admin", pw_hash, salt, "A"),
-        )
+        password = "admin123!"
+        pw_hash = sha256_hex(salt + password)
+        cur.execute("""
+            INSERT INTO employee_auth(emp_id, login_id, pw_hash, pw_salt)
+            VALUES (?,?,?,?)
+        """, (emp_id, "admin", pw_hash, salt))
+
         conn.commit()
 
     conn.close()
 
-init_db()
+seed_minimum()
 
-# ===== helpers =====
-def get_sites():
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT id, name FROM sites ORDER BY name")
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+# -----------------------------------------------------------------------------
+# 세션 미들웨어
+# -----------------------------------------------------------------------------
+app.add_middleware(
+    SessionMiddleware,
+    secret_key="CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_please-2025",
+    same_site="lax",
+    https_only=False,
+    max_age=60 * 60 * 8,  # 8h
+)
 
-def get_event_managers():
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT DISTINCT manager FROM events WHERE IFNULL(manager,'')<>'' ORDER BY manager")
-    rows = [r[0] for r in cur.fetchall()]
-    conn.close()
-    return rows
+# -----------------------------------------------------------------------------
+# 인증 가드 미들웨어 (템플릿/정적/로그인 등 허용 경로 제외)
+#  - request.scope['session']만 사용해 SessionMiddleware 유무에도 안전
+# -----------------------------------------------------------------------------
+class AuthGuardMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, open_exact: tuple[str, ...], open_prefix: tuple[str, ...]):
+        super().__init__(app)
+        self.open_exact = open_exact
+        self.open_prefix = open_prefix
 
-def current_user(request: Request):
-    s = request.scope.get("session") or {}
-    uid = s.get("uid")
-    uname = s.get("username")  # 로그인 시 넣은 키와 일치
-    role = s.get("role")
-    return {"id": uid, "username": uname, "role": role} if uid else None
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
 
-def require_roles(request: Request, allowed: List[str]) -> Optional[Response]:
+        # 화이트리스트
+        if path in self.open_exact or any(path.startswith(p) for p in self.open_prefix):
+            return await call_next(request)
+
+        s = get_session_dict(request)
+        if s.get("emp_id"):
+            return await call_next(request)
+
+        return RedirectResponse("/login", status_code=303)
+
+app.add_middleware(
+    AuthGuardMiddleware,
+    open_exact=("/login", "/logout", "/favicon.ico", "/_routes", "/_whoami"),
+    open_prefix=("/static", "/uploads", "/docs", "/redoc", "/openapi.json"),
+)
+
+# -----------------------------------------------------------------------------
+# 작은 헬퍼: 현재 사용자
+# -----------------------------------------------------------------------------
+def current_user(request: Request) -> Optional[Dict[str, Any]]:
+    s = get_session_dict(request)
+    if s.get("emp_id"):
+        return {
+            "emp_id": s.get("emp_id"),
+            "name": s.get("emp_name"),
+            "dept_id": s.get("dept_id"),
+            "roles": s.get("roles", []),
+            "login_id": s.get("login_id"),
+        }
+    return None
+
+def require_role(request: Request, allowed: List[str]) -> Optional[Response]:
     user = current_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    if user["role"] not in allowed:
-        return HTMLResponse("권한이 없습니다.", status_code=403)
+    user_roles = set(user.get("roles", []))
+    if not user_roles.intersection(set(allowed)):
+        return HTMLResponse("<h3>권한이 없습니다.</h3>", status_code=403)
     return None
 
-@app.get("/favicon.ico")
-def favicon():
-    return Response(status_code=204)
+# -----------------------------------------------------------------------------
+# 뷰: 로그인/로그아웃
+# -----------------------------------------------------------------------------
+def render_login(request: Request, error: str = "") -> HTMLResponse:
+    # templates/login.html 있으면 그걸 사용
+    try:
+        return templates.TemplateResponse("login.html", {"request": request, "error": error})
+    except Exception:
+        # 폴백 간단 페이지
+        html = f"""
+        <html><head><meta charset="utf-8"><title>로그인</title>
+        <style>
+        body{{font-family:ui-sans-serif,system-ui,Apple SD Gothic Neo,Malgun Gothic}}
+        .card{{max-width:420px;margin:64px auto;padding:16px;border:1px solid #e5e7eb;border-radius:12px}}
+        label{{display:block;margin:.25rem 0 .25rem}}
+        input{{width:100%;padding:.5rem;border:1px solid #e5e7eb;border-radius:8px}}
+        .err{{margin:.5rem 0;color:#dc2626}}
+        button{{padding:.5rem .8rem;border-radius:8px;border:1px solid #e5e7eb;background:#111827;color:#fff}}
+        </style></head><body>
+        <div class="card">
+          <h2 style="margin:0 0 .75rem">로그인</h2>
+          {"<div class='err'>"+error+"</div>" if error else ""}
+          <form method="post" action="/login">
+            <label>아이디</label>
+            <input type="text" name="login_id" required>
+            <label style="margin-top:.5rem">비밀번호</label>
+            <input type="password" name="password" required>
+            <div style="margin-top:.75rem"><button type="submit">로그인</button></div>
+          </form>
+        </div>
+        </body></html>
+        """
+        return HTMLResponse(html)
 
-@app.get("/_whoami")
-def whoami(request: Request):
-    s = dict(request.session)
-    # 민감한 값만 추려서 보여주자
-    return JSONResponse({
-        "uid": s.get("uid"),
-        "username": s.get("username"),
-        "role": s.get("role"),
-        "raw_keys": list(s.keys())
-    })
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    return render_login(request)
 
+@app.post("/login")
+def login_submit(
+    request: Request,
+    login_id: str = Form(...),
+    password: str = Form(...),
+):
+    conn = db(); cur = conn.cursor()
+    cur.execute("""
+        SELECT a.auth_id, a.emp_id, a.login_id, a.pw_hash, a.pw_salt,
+               e.name AS emp_name, e.dept_id
+          FROM employee_auth a
+          JOIN employees e ON e.emp_id = a.emp_id
+         WHERE a.login_id = ?
+    """, (login_id.strip(),))
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
+        return render_login(request, "아이디 또는 비밀번호가 올바르지 않습니다.")
+
+    if not verify_password(password, row["pw_hash"], row["pw_salt"]):
+        conn.close()
+        return render_login(request, "아이디 또는 비밀번호가 올바르지 않습니다.")
+
+    # 역할 목록
+    cur.execute("""
+        SELECT r.role_code
+          FROM employee_roles er
+          JOIN roles r ON r.role_id = er.role_id
+         WHERE er.emp_id = ?
+    """, (row["emp_id"],))
+    roles = [r[0] for r in cur.fetchall()]
+    conn.close()
+
+    # 세션 세팅
+    request.session.clear()
+    request.session["emp_id"]   = row["emp_id"]
+    request.session["emp_name"] = row["emp_name"]
+    request.session["dept_id"]  = row["dept_id"]
+    request.session["login_id"] = row["login_id"]
+    request.session["roles"]    = roles
+
+    return RedirectResponse("/schedules", status_code=303)
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+# -----------------------------------------------------------------------------
+# 디버그
+# -----------------------------------------------------------------------------
 @app.get("/_routes")
 def show_routes():
     out = []
@@ -279,593 +301,166 @@ def show_routes():
             out.append({"path": r.path, "methods": methods})
     return JSONResponse(out)
 
-# ===== Auth pages =====
-@app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, msg: Optional[str] = None):
-    return templates.TemplateResponse("login.html", {"request": request, "msg": msg or ""})
+@app.get("/_whoami")
+def whoami(request: Request):
+    return JSONResponse(get_session_dict(request))
 
-@app.post("/login")
-def login_submit(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-):
-    conn = db(); cur = conn.cursor()
-    cur.execute(
-        "SELECT id, username, password_hash, salt, role FROM users WHERE username=?",
-        (username.strip(),)
-    )
-    row = cur.fetchone()
-    conn.close()
+@app.get("/favicon.ico")
+def favicon():
+    return Response(status_code=204)
 
-    if not row:
-        return RedirectResponse("/login?msg=아이디나 비밀번호가 올바르지 않습니다.", status_code=303)
-
-    digest = hashlib.sha256((row["salt"] + password).encode()).hexdigest()
-    if digest != row["password_hash"]:
-        return RedirectResponse("/login?msg=아이디나 비밀번호가 올바르지 않습니다.", status_code=303)
-
-    request.session.clear()
-    request.session["uid"] = row["id"]
-    request.session["username"] = row["username"]
-    request.session["role"] = row["role"]
-    return RedirectResponse("/calendar", status_code=303)
-
-
-@app.get("/logout")
-def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse("/login", status_code=303)
-
-# ===== Home =====
-@app.get("/", response_class=HTMLResponse)
+# -----------------------------------------------------------------------------
+# 홈 → 일정
+# -----------------------------------------------------------------------------
+@app.get("/")
 def home():
-    return RedirectResponse(url="/calendar")
+    return RedirectResponse("/schedules", status_code=303)
 
-# ===== Calendar =====
-@app.get("/calendar", response_class=HTMLResponse)
-def calendar_page(request: Request):
-    managers = get_event_managers()
-    statuses = ["진행", "완료", "보류"]
-    return templates.TemplateResponse("calendar.html", {
-        "request": request,
-        "managers": managers,
-        "statuses": statuses
-    })
-
-@app.get("/api/events")
-def api_events(
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    manager: Optional[str] = None,
-    status: Optional[str] = None,
-    q: Optional[str] = None,
-    site: Optional[str] = None
-):
-    conn = db(); cur = conn.cursor()
-    where, args = [], []
-
-    if start and end:
-        where.append("(date(start) < date(?) AND (end IS NULL OR date(end) >= date(?)))")
-        args += [end, start]
-    if manager:
-        where.append("manager=?"); args.append(manager)
-    if status:
-        where.append("status=?"); args.append(status)
-    if site:
-        where.append("site LIKE ?"); args.append(f"%{site}%")
-    if q:
-        where.append("(title LIKE ? OR site LIKE ?)"); args += [f"%{q}%", f"%{q}%"]
-
-    sql = "SELECT id,title,start,end,manager,site,status,color FROM events"
-    if where: sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY date(start)"
-    cur.execute(sql, args)
-    rows = cur.fetchall()
-    conn.close()
-
-    events = []
-    for r in rows:
-        events.append({
-            "id": r["id"],
-            "title": r["title"],
-            "start": r["start"],
-            "end": r["end"],
-            "color": r["color"] or color_for_manager(r["manager"]),
-            "extendedProps": {
-                "manager": r["manager"],
-                "site": r["site"],
-                "status": r["status"],
-            }
-        })
-    return JSONResponse(events)
-
-# ===== Event CRUD =====
-@app.get("/events/new", response_class=HTMLResponse)
-def events_new_page(request: Request, date: Optional[str] = None):
-    today = dt.date.today()
-    data = {
-        "title": "",
-        "start": date or str(today),
-        "end": "",
-        "manager": "",
-        "site": "",
-        "status": "진행",
-        "color": "#2563eb",
-    }
-    return templates.TemplateResponse(
-        "events_form.html",
-        {"request": request, "mode": "new", "data": data,
-         "sites": get_sites(), "color_palette": color_palette(),
-         "default_color": "#2563eb"}
-    )
-
-@app.post("/events/new")
-def events_new_submit(
-    request: Request,
-    title: str = Form(...),
-    start: str = Form(...),
-    end: str = Form(None),
-    manager: str = Form(None),
-    site: str = Form(None),
-    status: str = Form(None),
-    color: str = Form("#2563eb"),
-):
-    deny = require_roles(request, ["A", "B"])
-    if deny: return deny
-
+# -----------------------------------------------------------------------------
+# 부서 목록 (읽기 전용)
+# -----------------------------------------------------------------------------
+@app.get("/departments", response_class=HTMLResponse)
+def departments_page(request: Request):
     conn = db(); cur = conn.cursor()
     cur.execute("""
-        INSERT INTO events(title,start,end,manager,site,status,color)
-        VALUES (?,?,?,?,?,?,?)
-    """, (title.strip(), start.strip(),
-          (end or "").strip() or None,
-          (manager or "").strip() or None,
-          (site or "").strip() or None,
-          (status or "").strip() or None,
-          (color or "#2563eb").strip()))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/calendar", status_code=303)
-
-@app.get("/events/edit/{eid}", response_class=HTMLResponse)
-def events_edit_page(request: Request, eid: int):
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT id,title,start,end,manager,site,status,color FROM events WHERE id=?", (eid,))
-    row = cur.fetchone(); conn.close()
-    if not row:
-        return HTMLResponse("존재하지 않는 일정입니다.", status_code=404)
-    data = dict(row)
-    if not data.get("color"):
-        data["color"] = "#2563eb"
-    return templates.TemplateResponse(
-        "events_form.html",
-        {"request": request, "mode": "edit", "data": data,
-         "sites": get_sites(), "color_palette": color_palette(),
-         "default_color": "#2563eb"}
-    )
-
-@app.post("/events/edit/{eid}")
-def events_edit_submit(
-    request: Request,
-    eid: int,
-    title: str = Form(...),
-    start: str = Form(...),
-    end: str = Form(None),
-    manager: str = Form(None),
-    site: str = Form(None),
-    status: str = Form(None),
-    color: str = Form("#2563eb"),
-):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-
-    conn = db(); cur = conn.cursor()
-    cur.execute("""
-        UPDATE events
-           SET title=?, start=?, end=?, manager=?, site=?, status=?, color=?
-         WHERE id=?
-    """, (title.strip(), start.strip(),
-          (end or "").strip() or None,
-          (manager or "").strip() or None,
-          (site or "").strip() or None,
-          (status or "").strip() or None,
-          (color or "#2563eb").strip(),
-          eid))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/calendar", status_code=303)
-
-@app.post("/events/delete/{eid}")
-def events_delete(request: Request, eid: int):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-    conn = db(); cur = conn.cursor()
-    cur.execute("DELETE FROM events WHERE id=?", (eid,))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/calendar", status_code=303)
-
-# ===== Reports =====
-def get_report_managers():
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT DISTINCT manager FROM reports WHERE IFNULL(manager,'')<>'' ORDER BY manager")
-    rows = [r[0] for r in cur.fetchall()]
-    conn.close()
-    return rows
-
-@app.get("/reports", response_class=HTMLResponse)
-def reports_list(
-    request: Request,
-    fdate: Optional[str] = None,
-    tdate: Optional[str] = None,
-    manager: Optional[str] = None,
-    status: Optional[str] = None,
-    q: Optional[str] = None,
-):
-    conn = db(); cur = conn.cursor()
-    where, args = [], []
-    if fdate: where.append("date(date) >= date(?)"); args.append(fdate)
-    if tdate: where.append("date(date) <= date(?)"); args.append(tdate)
-    if manager: where.append("manager = ?"); args.append(manager)
-    if status: where.append("status = ?"); args.append(status)
-    if q:
-        where.append("(site LIKE ? OR detail LIKE ? OR IFNULL(note,'') LIKE ?)")
-        args += [f"%{q}%", f"%{q}%", f"%{q}%"]
-    sql = "SELECT id,date,site,detail,manager,status,note FROM reports"
-    if where: sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY date(date) DESC, id DESC"
-    cur.execute(sql, args)
-    items = [dict(r) for r in cur.fetchall()]
+        SELECT d.dept_id, d.dept_code, d.name,
+               p.name AS parent_name, d.status, d.created_at, d.updated_at
+          FROM departments d
+          LEFT JOIN departments p ON p.dept_id = d.parent_id
+         WHERE d.deleted_at IS NULL
+         ORDER BY COALESCE(p.name, d.name), d.name
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
     conn.close()
 
-    return templates.TemplateResponse("reports_list.html", {
-        "request": request,
-        "items": items,
-        "fdate": fdate or "",
-        "tdate": tdate or "",
-        "manager": manager or "",
-        "status": status or "",
-        "q": q or "",
-        "managers": get_report_managers(),
-    })
+    # 템플릿 있으면 사용
+    try:
+        return templates.TemplateResponse("departments_list.html", {"request": request, "items": rows})
+    except Exception:
+        # 폴백
+        body = "<h2>부서</h2><table border=1 cellpadding=6><tr><th>ID</th><th>CODE</th><th>이름</th><th>상위</th><th>상태</th></tr>"
+        for r in rows:
+            body += f"<tr><td>{r['dept_id']}</td><td>{r['dept_code']}</td><td>{r['name']}</td><td>{r.get('parent_name') or ''}</td><td>{r['status']}</td></tr>"
+        body += "</table>"
+        return HTMLResponse(f"<html><body style='font-family:sans-serif'>{body}</body></html>")
 
-@app.get("/reports/new", response_class=HTMLResponse)
-def reports_new_page(request: Request, date: Optional[str] = None):
-    data = {"date": date or str(dt.date.today()),
-            "site": "", "detail": "", "manager": "", "status": "진행", "note": ""}
-    return templates.TemplateResponse("reports_form.html", {"request": request, "mode": "new", "data": data})
-
-@app.post("/reports/new")
-def reports_new_submit(
-    request: Request,
-    date: str = Form(...),
-    site: str = Form(...),
-    detail: str = Form(...),
-    manager: str = Form(None),
-    status: str = Form(None),
-    note: str = Form(None),
-):
-    deny = require_roles(request, ["A", "B"])
-    if deny: return deny
-
-    conn = db(); cur = conn.cursor()
-    cur.execute("INSERT INTO reports(date,site,detail,manager,status,note) VALUES (?,?,?,?,?,?)",
-                (date, site, detail, manager or "", status or "", note or ""))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/reports", status_code=303)
-
-@app.get("/reports/edit/{rid}", response_class=HTMLResponse)
-def reports_edit_page(request: Request, rid: int):
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT id,date,site,detail,manager,status,note FROM reports WHERE id=?", (rid,))
-    row = cur.fetchone(); conn.close()
-    if not row:
-        return HTMLResponse("존재하지 않는 보고서입니다.", status_code=404)
-    return templates.TemplateResponse("reports_form.html", {"request": request, "mode": "edit", "data": dict(row)})
-
-@app.post("/reports/edit/{rid}")
-def reports_edit_submit(
-    request: Request,
-    rid: int,
-    date: str = Form(...),
-    site: str = Form(...),
-    detail: str = Form(...),
-    manager: str = Form(None),
-    status: str = Form(None),
-    note: str = Form(None),
-):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-
-    conn = db(); cur = conn.cursor()
-    cur.execute("""
-        UPDATE reports SET date=?, site=?, detail=?, manager=?, status=?, note=? WHERE id=?
-    """, (date, site, detail, manager or "", status or "", note or "", rid))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/reports", status_code=303)
-
-@app.post("/reports/delete/{rid}")
-def reports_delete(request: Request, rid: int):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-
-    folder = os.path.join(UPLOAD_ROOT, "reports", str(rid))
-    if os.path.isdir(folder):
-        shutil.rmtree(folder, ignore_errors=True)
-    conn = db(); cur = conn.cursor()
-    cur.execute("DELETE FROM report_files WHERE report_id=?", (rid,))
-    cur.execute("DELETE FROM reports WHERE id=?", (rid,))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/reports", status_code=303)
-
-@app.get("/reports/export")
-def reports_export_csv(
-    fdate: Optional[str] = None,
-    tdate: Optional[str] = None,
-    manager: Optional[str] = None,
-    status: Optional[str] = None,
-    q: Optional[str] = None,
-):
-    conn = db(); cur = conn.cursor()
-    where, args = [], []
-    if fdate: where.append("date(date) >= date(?)"); args.append(fdate)
-    if tdate: where.append("date(date) <= date(?)"); args.append(tdate)
-    if manager: where.append("manager = ?"); args.append(manager)
-    if status: where.append("status = ?"); args.append(status)
-    if q:
-        where.append("(site LIKE ? OR detail LIKE ? OR IFNULL(note,'') LIKE ?)")
-        args += [f"%{q}%", f"%{q}%", f"%{q}%"]
-
-    sql = "SELECT id,date,site,detail,manager,status,note FROM reports"
-    if where: sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY date(date) DESC, id DESC"
-
-    cur.execute(sql, args)
-    rows = cur.fetchall(); conn.close()
-
-    lines = ["id,date,site,detail,manager,status,note"]
-    for r in rows:
-        vals = [str(r["id"]), r["date"], r["site"], r["detail"], r["manager"] or "", r["status"] or "", r["note"] or ""]
-        vals = [v.replace('"','""') for v in vals]
-        lines.append(",".join(f'"{v}"' for v in vals))
-    csv_bytes = ("\n".join(lines)).encode("utf-8-sig")
-    return Response(content=csv_bytes, media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition":"attachment; filename=reports.csv"})
-
-# file uploads
-ALLOWED_REPORT_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"}
-
-@app.post("/reports/{rid}/upload")
-async def reports_upload_files(request: Request, rid: int, files: List[UploadFile] = File(...)):
-    deny = require_roles(request, ["A", "B"])
-    if deny: return deny
-    target_dir = os.path.join(UPLOAD_ROOT, "reports", str(rid))
-    os.makedirs(target_dir, exist_ok=True)
-
-    conn = db(); cur = conn.cursor()
-    now = dt.datetime.now().isoformat(timespec="seconds")
-
-    for uf in files:
-        ext = os.path.splitext(uf.filename)[1].lower()
-        if ext not in ALLOWED_REPORT_EXT:
-            continue
-        safe_name = secure_filename(uf.filename)
-        final_name = f"{dt.datetime.now().strftime('%Y%m%d%H%M%S%f')}_{safe_name}"
-        disk_path = os.path.join(target_dir, final_name)
-        with open(disk_path, "wb") as out:
-            out.write(await uf.read())
-        rel_path = os.path.relpath(disk_path, UPLOAD_ROOT).replace("\\", "/")
-        cur.execute("""
-            INSERT INTO report_files(report_id, file_path, orig_name, content_type, uploaded_at)
-            VALUES(?,?,?,?,?)
-        """, (rid, rel_path, uf.filename, uf.content_type or "", now))
-
-    conn.commit(); conn.close()
-    return RedirectResponse(url=f"/reports/edit/{rid}", status_code=303)
-
-@app.post("/reports/{rid}/file/{fid}/delete")
-def reports_delete_file(request: Request, rid: int, fid: int):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT file_path FROM report_files WHERE id=? AND report_id=?", (fid, rid))
-    row = cur.fetchone()
-    if row:
-        abs_path = os.path.join(UPLOAD_ROOT, row["file_path"])
-        if os.path.isfile(abs_path):
-            os.remove(abs_path)
-        cur.execute("DELETE FROM report_files WHERE id=?", (fid,))
-        conn.commit()
-    conn.close()
-    return RedirectResponse(url=f"/reports/edit/{rid}", status_code=303)
-
-# ===== Sites =====
+# -----------------------------------------------------------------------------
+# 현장 목록 (새 스키마: sites)
+# -----------------------------------------------------------------------------
 @app.get("/sites", response_class=HTMLResponse)
-def sites_list(request: Request):
+def sites_page(request: Request):
     conn = db(); cur = conn.cursor()
-    cur.execute("SELECT id,name,address,camera_count,db_server,ip,server_location FROM sites ORDER BY name")
-    items = [dict(r) for r in cur.fetchall()]
+    cur.execute("""
+        SELECT site_id, name, camera_count, nrs_count, note, created_at, updated_at
+          FROM sites
+         WHERE deleted_at IS NULL
+         ORDER BY name
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
     conn.close()
-    return templates.TemplateResponse("sites_list.html", {"request": request, "items": items})
 
-@app.get("/sites/new", response_class=HTMLResponse)
-def sites_new_page(request: Request):
-    data = {"name":"", "address":"", "camera_count":"", "db_server":"", "ip":"", "server_location":""}
-    return templates.TemplateResponse("sites_form.html", {"request": request, "mode":"new", "data": data})
+    try:
+        return templates.TemplateResponse("sites_list.html", {"request": request, "items": rows})
+    except Exception:
+        body = "<h2>현장</h2><table border=1 cellpadding=6><tr><th>ID</th><th>이름</th><th>카메라</th><th>NRS</th><th>비고</th></tr>"
+        for r in rows:
+            body += f"<tr><td>{r['site_id']}</td><td>{r['name']}</td><td>{r['camera_count']}</td><td>{r['nrs_count']}</td><td>{r.get('note','') or ''}</td></tr>"
+        body += "</table>"
+        return HTMLResponse(f"<html><body style='font-family:sans-serif'>{body}</body></html>")
 
-@app.post("/sites/new")
-def sites_new_submit(
-    request: Request,
-    name: str = Form(...),
-    address: str = Form(...),
-    camera_count: Optional[int] = Form(None),
-    db_server: Optional[int] = Form(None),
-    ip: Optional[str] = Form(None),
-    server_location: Optional[str] = Form(None),
+# -----------------------------------------------------------------------------
+# 일정(= cs_schedules) 리스트 + API
+# -----------------------------------------------------------------------------
+@app.get("/schedules", response_class=HTMLResponse)
+def schedules_page(request: Request,
+                   fdate: Optional[str] = None,
+                   tdate: Optional[str] = None,
+                   status: Optional[str] = None,
+                   site_id: Optional[int] = None,
+                   assignee_emp_id: Optional[int] = None):
+    # 단순 목록 화면 (템플릿 없으면 폴백)
+    try:
+        return templates.TemplateResponse("schedules.html", {"request": request})
+    except Exception:
+        # 폴백 화면은 API 링크와 간단 설명만
+        html = """
+        <html><head><meta charset="utf-8"><title>CS 일정</title></head>
+        <body style="font-family:sans-serif">
+          <h2>CS 일정</h2>
+          <p>프런트 템플릿이 없어서 간단 화면만 보여줍니다.</p>
+          <p><a href="/api/schedules">/api/schedules</a> 에서 JSON을 확인하세요.</p>
+        </body></html>
+        """
+        return HTMLResponse(html)
+
+@app.get("/api/schedules")
+def api_schedules(
+    fdate: Optional[str] = None,   # YYYY-MM-DD
+    tdate: Optional[str] = None,   # YYYY-MM-DD
+    status: Optional[str] = None,  # todo|in_progress|done|lab_request
+    site_id: Optional[int] = None,
+    assignee_emp_id: Optional[int] = None,
 ):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
     conn = db(); cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO sites(name, address, camera_count, db_server, ip, server_location)
-        VALUES(?,?,?,?,?,?)
-    """, (name.strip(), address.strip(), camera_count, db_server,
-          (ip or "").strip(), (server_location or "").strip()))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/sites", status_code=303)
 
-@app.get("/sites/edit/{sid}", response_class=HTMLResponse)
-def sites_edit_page(request: Request, sid: int):
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT id,name,address,camera_count,db_server,ip,server_location FROM sites WHERE id=?", (sid,))
-    row = cur.fetchone(); conn.close()
-    if not row:
-        return HTMLResponse("존재하지 않는 현장입니다.", status_code=404)
-    return templates.TemplateResponse("sites_form.html", {"request": request, "mode":"edit", "data": dict(row)})
+    where = []
+    args: List[Any] = []
 
-@app.post("/sites/edit/{sid}")
-def sites_edit_submit(
-    request: Request,
-    sid: int,
-    name: str = Form(...),
-    address: str = Form(...),
-    camera_count: Optional[int] = Form(None),
-    db_server: Optional[int] = Form(None),
-    ip: Optional[str] = Form(None),
-    server_location: Optional[str] = Form(None),
-):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-    conn = db(); cur = conn.cursor()
-    cur.execute("""
-        UPDATE sites
-           SET name=?, address=?, camera_count=?, db_server=?, ip=?, server_location=?
-         WHERE id=?
-    """, (name.strip(), address.strip(), camera_count, db_server,
-          (ip or "").strip(), (server_location or "").strip(), sid))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/sites", status_code=303)
+    if fdate:
+        where.append("date(s.start_date) >= date(?)")
+        args.append(fdate)
+    if tdate:
+        where.append("(s.end_date IS NULL OR date(s.end_date) <= date(?))")
+        args.append(tdate)
+    if status:
+        where.append("s.status = ?")
+        args.append(status)
+    if site_id:
+        where.append("s.site_id = ?")
+        args.append(site_id)
+    if assignee_emp_id:
+        where.append("""
+            s.schedule_id IN (
+              SELECT schedule_id FROM cs_schedule_assignees WHERE emp_id = ?
+            )
+        """)
+        args.append(assignee_emp_id)
 
-@app.post("/sites/delete/{sid}")
-def sites_delete(request: Request, sid: int):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-    conn = db(); cur = conn.cursor()
-    cur.execute("DELETE FROM sites WHERE id=?", (sid,))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/sites", status_code=303)
+    sql = """
+        SELECT s.schedule_id, s.request_id, s.start_date, s.end_date,
+               s.site_id, si.name AS site_name,
+               s.request_content, s.work_content, s.extra_content,
+               s.status, s.note, s.created_at, s.updated_at,
+               (SELECT COUNT(*) FROM cs_schedule_assignees a
+                 WHERE a.schedule_id = s.schedule_id) AS assignee_count
+          FROM cs_schedules s
+          LEFT JOIN sites si ON si.site_id = s.site_id
+    """
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY date(s.start_date) DESC, s.schedule_id DESC"
 
-# ===== Forms =====
-ALLOWED_FORM_EXT = {".csv", ".doc", ".docx", ".hwp", ".pdf"}
-
-@app.get("/forms", response_class=HTMLResponse)
-def forms_list(request: Request):
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT id,name,purpose,IFNULL(orig_name,'') AS orig_name,uploaded_at FROM forms ORDER BY id DESC")
-    items = [dict(r) for r in cur.fetchall()]
+    cur.execute(sql, args)
+    rows = [dict(r) for r in cur.fetchall()]
     conn.close()
-    return templates.TemplateResponse("forms_list.html", {"request": request, "items": items})
+    return JSONResponse(rows)
 
-@app.get("/forms/new", response_class=HTMLResponse)
-def forms_new_page(request: Request):
-    data = {"name":"", "purpose":""}
-    return templates.TemplateResponse("forms_form.html", {"request": request, "mode":"new", "data": data})
+# -----------------------------------------------------------------------------
+# 간단한 '권한 필요' 예시 엔드포인트 (ADMIN만)
+# -----------------------------------------------------------------------------
+@app.get("/admin/ping")
+def admin_ping(request: Request):
+    deny = require_role(request, ["ADMIN"])
+    if deny:
+        return deny
+    return PlainTextResponse("pong (admin)")
 
-@app.post("/forms/new")
-async def forms_new_submit(
-    request: Request,
-    name: str = Form(...),
-    purpose: str = Form(None),
-    file: UploadFile = File(None),
-):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-
-    rel_path = None; orig = None; ctype = None
-    if file and file.filename:
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext in ALLOWED_FORM_EXT:
-            folder = os.path.join(UPLOAD_ROOT, "forms")
-            os.makedirs(folder, exist_ok=True)
-            safe = secure_filename(file.filename)
-            final = f"{dt.datetime.now().strftime('%Y%m%d%H%M%S%f')}_{safe}"
-            disk = os.path.join(folder, final)
-            with open(disk, "wb") as out:
-                out.write(await file.read())
-            rel_path = os.path.relpath(disk, UPLOAD_ROOT).replace("\\","/")
-            orig = file.filename
-            ctype = file.content_type or ""
-
-    conn = db(); cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO forms(name,purpose,file_path,orig_name,content_type,uploaded_at)
-        VALUES(?,?,?,?,?,?)
-    """, (name.strip(), (purpose or "").strip(), rel_path, orig, ctype,
-          dt.datetime.now().isoformat(timespec="seconds")))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/forms", status_code=303)
-
-@app.get("/forms/edit/{fid}", response_class=HTMLResponse)
-def forms_edit_page(request: Request, fid: int):
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT id,name,purpose,file_path,orig_name FROM forms WHERE id=?", (fid,))
-    row = cur.fetchone(); conn.close()
-    if not row:
-        return HTMLResponse("존재하지 않는 서류입니다.", status_code=404)
-    return templates.TemplateResponse("forms_form.html", {"request": request, "mode":"edit", "data": dict(row)})
-
-@app.post("/forms/edit/{fid}")
-async def forms_edit_submit(
-    request: Request,
-    fid: int,
-    name: str = Form(...),
-    purpose: str = Form(None),
-    file: UploadFile = File(None),
-):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT file_path FROM forms WHERE id=?", (fid,))
-    old = cur.fetchone()
-    rel_path = old["file_path"] if old else None
-    orig = None; ctype = None
-
-    if file and file.filename:
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext in ALLOWED_FORM_EXT:
-            if rel_path:
-                old_abs = os.path.join(UPLOAD_ROOT, rel_path)
-                if os.path.isfile(old_abs):
-                    os.remove(old_abs)
-            folder = os.path.join(UPLOAD_ROOT, "forms")
-            os.makedirs(folder, exist_ok=True)
-            safe = secure_filename(file.filename)
-            final = f"{dt.datetime.now().strftime('%Y%m%d%H%M%S%f')}_{safe}"
-            disk = os.path.join(folder, final)
-            with open(disk, "wb") as out:
-                out.write(await file.read())
-            rel_path = os.path.relpath(disk, UPLOAD_ROOT).replace("\\","/")
-            orig = file.filename
-            ctype = file.content_type or ""
-
-    cur.execute("""
-        UPDATE forms SET name=?, purpose=?, file_path=?, orig_name=?, content_type=?, uploaded_at=?
-        WHERE id=?
-    """, (name.strip(), (purpose or "").strip(), rel_path, orig, ctype,
-          dt.datetime.now().isoformat(timespec="seconds"), fid))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/forms", status_code=303)
-
-@app.post("/forms/delete/{fid}")
-def forms_delete(request: Request, fid: int):
-    deny = require_roles(request, ["A"])
-    if deny: return deny
-    conn = db(); cur = conn.cursor()
-    cur.execute("SELECT file_path FROM forms WHERE id=?", (fid,))
-    row = cur.fetchone()
-    if row and row["file_path"]:
-        abs_path = os.path.join(UPLOAD_ROOT, row["file_path"])
-        if os.path.isfile(abs_path):
-            os.remove(abs_path)
-    cur.execute("DELETE FROM forms WHERE id=?", (fid,))
-    conn.commit(); conn.close()
-    return RedirectResponse(url="/forms", status_code=303)
+# -----------------------------------------------------------------------------
+# 앱 시작 안내
+# -----------------------------------------------------------------------------
+@app.on_event("startup")
+def _startup_banner():
+    print("✅ App started. Try:")
+    print("  - http://localhost:8000/login  (admin / admin123!)")
+    print("  - http://localhost:8000/_routes")
+    print("  - http://localhost:8000/_whoami")
