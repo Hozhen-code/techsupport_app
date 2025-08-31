@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - NAIZ{% endblock %}
+
+{% block content %}
+<h1 class="mb-2">{{ title }}</h1>
+
+<div class="card">
+  <div class="card-body">
+    <div class="mb-2">
+      {% if routes.new %}<a href="{{ routes.new }}" class="btn btn-primary btn-small">+ 등록</a>{% endif %}
+    </div>
+
+    <table class="table">
+      <thead>
+        <tr>
+          {% for h in headers %}<th>{{ h }}</th>{% endfor %}
+          {% if routes.edit or routes.delete or routes.child %}<th>작업</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% for col in row %}<td>{{ col }}</td>{% endfor %}
+          {% if routes.edit or routes.delete or routes.child %}
+          <td class="actions">
+            {% if routes.child %}
+              <a class="btn btn-outline btn-small" href="{{ routes.child|replace('{id}', row[0]|string) }}">자세히</a>
+            {% endif %}
+            {% if routes.edit %}
+              <a class="btn btn-outline btn-small" href="{{ routes.edit|replace('{id}', row[0]|string) }}">수정</a>
+            {% endif %}
+            {% if routes.delete %}
+              <form method="post" action="{{ routes.delete|replace('{id}', row[0]|string) }}" style="display:inline" onsubmit="return confirm('삭제하시겠습니까?');">
+                <button class="btn btn-danger btn-small" type="submit">삭제</button>
+              </form>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr>
+          <td class="text-center muted" colspan="{{ headers|length + (1 if (routes.edit or routes.delete or routes.child) else 0) }}">데이터가 없습니다.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

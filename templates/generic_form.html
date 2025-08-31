@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - NAIZ{% endblock %}
+
+{% block content %}
+<h1 class="mb-2">{{ title }}</h1>
+
+<div class="card">
+  <div class="card-body">
+    <form action="{{ action }}" method="{{ method|default('post') }}">
+      <div class="form-row">
+        {% for f in fields %}
+        <div class="mb-2" style="min-width:0">
+          <label for="{{ f.name }}">{{ f.label }}</label>
+
+          {% set val = f.value if f.value is defined else '' %}
+
+          {% if f.type == 'textarea' %}
+            <textarea id="{{ f.name }}" name="{{ f.name }}" class="form-control" {% if f.required %}required{% endif %}>{{ val }}</textarea>
+
+          {% elif f.type == 'select' %}
+            <select id="{{ f.name }}" name="{{ f.name }}" class="form-control">
+              {% if f.nullable %}<option value=""></option>{% endif %}
+              {% for oid, label in f.options %}
+                <option value="{{ oid }}" {% if (val|string) == (oid|string) %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+
+          {% elif f.type == 'multiselect' %}
+            {% set cur = val if val is iterable and (val is not string) else [val] %}
+            <select id="{{ f.name }}" name="{{ f.name }}" class="form-control" multiple size="8">
+              {% for oid, label in f.options %}
+                <option value="{{ oid }}" {% if (oid in cur) or ((oid|string) in (cur|map('string')|list)) %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <div class="help">Ctrl/Shift 로 다중 선택</div>
+
+          {% else %}
+            <input id="{{ f.name }}" name="{{ f.name }}" class="form-control"
+                   {% if f.type %}type="{{ f.type }}"{% else %}type="text"{% endif %}
+                   value="{{ val }}" {% if f.required %}required{% endif %}>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="mt-2">
+        <button class="btn btn-primary" type="submit">저장</button>
+        <a class="btn btn-outline" href="javascript:history.back()">취소</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
