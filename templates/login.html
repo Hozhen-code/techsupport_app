@@ -1,36 +1,121 @@
-{% block content %}
-<section class="page" style="max-width:440px;margin:40px auto;">
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>로그인 - NAIZ</title>
+  <style>
+    :root{
+      --bg:#f6f7fb;--card:#fff;--border:#e7e9ef;--text:#1f2328;--muted:#6b7280;--primary:#3b82f6;
+      --control-h:44px; --radius:12px;
+    }
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial}
+    .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:40px 16px}
+    .card{width:100%;max-width:480px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 .25rem .75rem rgba(0,0,0,.05)}
+    .card-body{padding:28px}
+    .brand{font-weight:800;font-size:18px;margin-top:6px;text-align:center}
+    .muted{color:var(--muted);font-size:13px;text-align:center}
+    .mb-1{margin-bottom:8px}.mb-2{margin-bottom:12px}.mb-3{margin-bottom:16px}.mb-4{margin-bottom:22px}
+    label{display:block;font-weight:600;margin-bottom:6px}
+    input,button{font:inherit}
+    .form-control{width:100%;height:var(--control-h);padding:0 12px;border:1px solid var(--border);border-radius:var(--radius);background:#fff;color:var(--text)}
+    .input-group{display:flex;gap:8px}
+    .icon-btn{
+      height:var(--control-h);width:var(--control-h);
+      display:inline-flex;align-items:center;justify-content:center;
+      border:1px solid var(--border);border-radius:var(--radius);
+      background:#fff;color:#374151;cursor:pointer;
+    }
+    .icon{width:22px;height:22px;display:block}
+    .btn{
+      display:inline-flex;align-items:center;justify-content:center;width:100%;
+      height:48px;border-radius:14px;border:1px solid transparent;background:var(--primary);color:#fff;cursor:pointer
+    }
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .alert{padding:10px 12px;border-radius:10px;background:#fee2e2;border:1px solid #fecaca;color:#991b1b;margin-bottom:16px}
+    .center{text-align:center}
+    .logo{height:52px;display:block;margin:0 auto 8px auto}
+    a.small{color:var(--muted);text-decoration:none}
+    a.small:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="card-body">
+        <img src="/static/img/logo.png" alt="NAIZ" class="logo" onerror="this.style.display='none'">
+        <div class="brand">NAIZ 전산프로그램</div>
 
-  <!-- 로고 -->
-  <div style="display:flex;justify-content:center;align-items:center;margin-bottom:18px;">
-    <img
-      src="{{ logo_src(request) }}"
-      alt="회사 로고"
-      style="max-width:180px;height:auto;object-fit:contain;"
-      onerror="this.onerror=null;this.src='{{ url_for('static', path='img/logo.svg') }}';"
-    >
+        {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+
+        <form id="loginForm" method="post" action="/login" autocomplete="on">
+          <div class="mb-3">
+            <label for="login_id">아이디</label>
+            <input id="login_id" name="login_id" class="form-control" autocomplete="username" required>
+          </div>
+
+          <div class="mb-2">
+            <label for="password">비밀번호</label>
+            <div class="input-group">
+              <input id="password" type="password" name="password" class="form-control" autocomplete="current-password" required>
+              <!-- 아이콘 버튼 (눈 ↔ 눈가림) -->
+              <button class="icon-btn" type="button" id="togglePw" aria-label="비밀번호 표시 전환" aria-pressed="false">
+                <!-- eye -->
+                <svg id="icon-eye" class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+                <!-- eye-off (처음엔 숨김) -->
+                <svg id="icon-eye-off" class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none">
+                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.77 21.77 0 0 1 5.06-5.94"/>
+                  <path d="M1 1l22 22"/>
+                  <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a21.8 21.8 0 0 1-3.2 4.2"/>
+                  <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <button id="submitBtn" class="btn" type="submit">로그인</button>
+        </form>
+
+        <div class="center mb-1" style="margin-top:12px;">
+          <a class="small" href="/healthz" target="_blank">상태 확인</a>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <h2>로그인</h2>
+  <script>
+    // 아이콘 토글 + 비밀번호 표시/숨김
+    (function(){
+      const btn = document.getElementById('togglePw');
+      const pw = document.getElementById('password');
+      const eye = document.getElementById('icon-eye');
+      const eyeOff = document.getElementById('icon-eye-off');
 
-  {% if error %}
-    <div class="card" style="border-color:#1de1c7;color:#b91c1c;background:#fff1f2;margin-bottom:12px;">
-      {{ error }}
-    </div>
-  {% endif %}
+      btn.addEventListener('click', function(){
+        const hidden = pw.type === 'password';
+        pw.type = hidden ? 'text' : 'password';
+        eye.style.display = hidden ? 'none' : 'block';
+        eyeOff.style.display = hidden ? 'block' : 'none';
+        btn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+        pw.focus();
+      });
+    })();
 
-  <form method="post" action="/login" class="card" style="padding:16px;border:1px solid #e6e6ef;border-radius:12px;background:#fff;">
-    <div class="row" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
-      <label>아이디</label>
-      <input class="input" type="text" name="username" required>
-    </div>
-    <div class="row" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
-      <label>비밀번호</label>
-      <input class="input" type="password" name="password" required>
-    </div>
-    <div class="row" style="display:flex;gap:8px;">
-      <button class="btn primary" type="submit">로그인</button>
-    </div>
-  </form>
-</section>
-{% endblock %}
+    // 전송 시 버튼 잠금
+    document.getElementById('loginForm').addEventListener('submit', function(){
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true;
+      btn.textContent = '로그인 중...';
+    });
+
+    // 아이디 입력 포커스
+    setTimeout(() => { const id = document.getElementById('login_id'); if (id) id.focus(); }, 50);
+  </script>
+</body>
+</html>

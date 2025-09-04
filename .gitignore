@@ -3,7 +3,6 @@ echo "__pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.db
 .env
 *.sqlite3
 " >> .gitignore
