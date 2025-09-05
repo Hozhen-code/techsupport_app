@@ -1,4 +1,4 @@
-# app.py — NAIZ 전산프로그램 (DDL 완전 대응판, 로그인 루프 수정/세션 쿠키명 분리/ /api/events 별칭 포함)
+# app.py — NAIZ 전산프로그램 (SW 코드/서비스 코드 반영판 + 소소한 버그픽스)
 import os
 import json
 from datetime import date
@@ -28,7 +28,7 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-prod")
-DEV_ALLOW_DEFAULT_LOGIN = os.getenv("DEV_ALLOW_DEFAULT_LOGIN", "1") == "1"  # employee_auth 없으면 admin/admin 허용
+DEV_ALLOW_DEFAULT_LOGIN = os.getenv("DEV_ALLOW_DEFAULT_LOGIN", "0") == "1"  # employee_auth 없으면 admin/admin 허용
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///naiz.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -37,9 +37,9 @@ app = FastAPI()
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
-    session_cookie="naiz_session",   # 이전 쿠키와 충돌 방지
+    session_cookie="naiz_session",
     same_site="lax",
-    https_only=False,                # 로컬 개발 환경
+    https_only=False,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -71,7 +71,7 @@ def get_db() -> OrmSession:
         db.close()
 
 # ------------------------------------------------------------------------------
-# 모델 (제공된 DDL 1:1 매핑)
+# 모델 (DDL 1:1 매핑)
 # ------------------------------------------------------------------------------
 class Department(Base):
     __tablename__ = "departments"
@@ -226,8 +226,10 @@ class CSHelp(Base):
 class SWProduct(Base):
     __tablename__ = "sw_products"
     sw_id = Column(Integer, primary_key=True)
+    sw_code = Column(String, nullable=False, unique=True)          # NEW
     sw_name = Column(String, nullable=False, unique=True)
     sw_func = Column(Text)
+    unit = Column(String)                                          # NEW
     price_wons = Column(Integer, nullable=False, default=0)
     status = Column(String, nullable=False, default="active")
     created_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
@@ -237,6 +239,7 @@ class SWService(Base):
     __tablename__ = "sw_services"
     sv_id = Column(Integer, primary_key=True)
     sw_id = Column(Integer, ForeignKey("sw_products.sw_id", ondelete="CASCADE"), nullable=False)
+    sv_code = Column(String, nullable=False, unique=True)          # NEW
     sv_name = Column(String, nullable=False)
     sv_type = Column(String, nullable=False, default="A")
     price_wons = Column(Integer, nullable=False, default=0)
@@ -257,7 +260,7 @@ def on_startup():
     init_db()
 
 # ------------------------------------------------------------------------------
-# 인증 (루프 이슈 해결 버전)
+# 인증
 # ------------------------------------------------------------------------------
 def verify_password_hash(pw: str, hash_str: str) -> bool:
     """bcrypt/argon2만 허용"""
@@ -273,7 +276,6 @@ def verify_password_hash(pw: str, hash_str: str) -> bool:
     return False
 
 def is_logged_in(request: Request) -> bool:
-    # "user" 키가 있으면 로그인으로 간주 (emp_id가 0이어도 OK)
     return "user" in request.session
 
 def require_login(request: Request):
@@ -294,23 +296,14 @@ def login_form(request: Request):
 @app.post("/login", response_class=HTMLResponse)
 def login_submit(request: Request, db: OrmSession = Depends(get_db),
                  login_id: str = Form(...), password: str = Form(...)):
-    # 1) employee_auth 조회
-    auth = db.execute(
-        select(EmployeeAuth).where(EmployeeAuth.login_id == login_id)
-    ).scalar_one_or_none()
-
+    auth = db.execute(select(EmployeeAuth).where(EmployeeAuth.login_id == login_id)).scalar_one_or_none()
     ok = False
     if auth:
         ok = verify_password_hash(password, auth.pw_hash)
-
-    # 2) 개발 편의: 계정 없으면 admin/admin 허용
-    if not ok and DEV_ALLOW_DEFAULT_LOGIN and login_id == "admin" and password == "admin":
-        ok = True
-
+    #if not ok and DEV_ALLOW_DEFAULT_LOGIN and login_id == "admin" and password == "admin":
+        #ok = True
     if not ok:
         return templates.TemplateResponse("login.html", {"request": request, "error": "로그인 실패"})
-
-    # 세션에 user만 체크 (루프 방지)
     request.session["user"] = login_id
     return RedirectResponse(url="/calendar", status_code=HTTP_302_FOUND)
 
@@ -344,7 +337,8 @@ def options_departments(db: OrmSession):
     return [(d.dept_id, d.name) for d in db.query(Department).order_by(Department.name).all()]
 
 def options_sw_products(db: OrmSession):
-    return [(p.sw_id, p.sw_name) for p in db.query(SWProduct).order_by(SWProduct.sw_name).all()]
+    # [CODE] NAME 표시
+    return [(p.sw_id, f"[{p.sw_code}] {p.sw_name}") for p in db.query(SWProduct).order_by(SWProduct.sw_name).all()]
 
 # ------------------------------------------------------------------------------
 # 캘린더 (cs_schedules 기반)
@@ -717,9 +711,22 @@ def vendors_edit(request: Request, vid: int, db: OrmSession = Depends(get_db)):
     return render_form(request,"협력사 수정",fields,f"/vendors/edit/{vid}")
 
 @app.post("/vendors/edit/{vid}")
-def vendors_edit_submit(request: Request, vid: int, db: OrmSession = Depends(get_db),
-                        name: str = Form(...), ceo_name: Optional[str] = Form(None), phone: Optional[str] = Form(None),
-                        email: Optional[str] = Form(None), address: Optional[str] = Form(None), note: Optional[str] = Form(None)):
+def vendors_edit_submit(request: Request, vid: int, db: OrmSession = Depends(get_db)):
+    require_login(request)
+    v = db.get(Vendor, vid); assert v
+    # 폼 필드
+    from fastapi import Form
+    name: str = request.form().get("name") if hasattr(request, "form") else None
+    # 간단한 방식으로 다시 정의
+    return RedirectResponse(url="/vendors", status_code=HTTP_302_FOUND)
+
+# ↑ 위 edit 처리에서 FastAPI의 Form 파라미터가 누락되면 에러가 나므로 아래와 같이 명시적으로 선언
+@app.post("/vendors/edit/{vid}")
+def vendors_edit_submit_correct(
+    request: Request, vid: int, db: OrmSession = Depends(get_db),
+    name: str = Form(...), ceo_name: Optional[str] = Form(None), phone: Optional[str] = Form(None),
+    email: Optional[str] = Form(None), address: Optional[str] = Form(None), note: Optional[str] = Form(None)
+):
     require_login(request)
     v = db.get(Vendor, vid); assert v
     v.name=name.strip(); v.ceo_name=ceo_name; v.phone=phone; v.email=email; v.address=address; v.note=note
@@ -893,7 +900,7 @@ def cs_requests_edit(request: Request, rid: int, db: OrmSession = Depends(get_db
             {"name":"locations","label":"상세현장(복수)","type":"multiselect","options":options_site_locations(db),"value":curr}]
     return render_form(request,"CS 요청 수정",fields,f"/cs_requests/edit/{rid}")
 
-@app.post("/cs_requests/edit/{rid']")
+@app.post("/cs_requests/edit/{rid}")
 def cs_requests_edit_submit(
     request: Request, rid: int, db: OrmSession = Depends(get_db),
     site_id: Optional[int] = Form(None), requester_name: str = Form(...),
@@ -1019,54 +1026,66 @@ def cs_schedules_delete(request: Request, sid: int, db: OrmSession = Depends(get
     return RedirectResponse(url="/cs_schedules", status_code=HTTP_302_FOUND)
 
 # ------------------------------------------------------------------------------
-# 제품: SW / 서비스
+# 제품: SW / 서비스 (코드 필드 반영)
 # ------------------------------------------------------------------------------
 @app.get("/sw_products", response_class=HTMLResponse)
 def sw_products_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    rows=[[p.sw_id,p.sw_name,p.price_wons,p.status,p.created_at] for p in db.query(SWProduct).order_by(SWProduct.sw_id.desc()).all()]
-    return render_list(request,"SW 제품",["ID","제품명","가격(원)","상태","생성"],rows,{
+    rows=[[p.sw_id, p.sw_code, p.sw_name, (p.unit or ""), p.price_wons, p.status, p.created_at]
+          for p in db.query(SWProduct).order_by(SWProduct.sw_id.desc()).all()]
+    return render_list(request,"SW 제품",["ID","제품코드","제품명","단위","가격(원)","상태","생성"],rows,{
         "new":"/sw_products/new","edit":"/sw_products/edit/{id}","delete":"/sw_products/delete/{id}","child":"/sw_services?sw_id={id}"
     })
 
 @app.get("/sw_products/new", response_class=HTMLResponse)
 def sw_products_new(request: Request):
     require_login(request)
-    fields=[{"name":"sw_name","label":"제품명","type":"text","required":True},
+    fields=[{"name":"sw_code","label":"제품코드","type":"text","required":True},
+            {"name":"sw_name","label":"제품명","type":"text","required":True},
             {"name":"sw_func","label":"기능설명","type":"textarea"},
+            {"name":"unit","label":"단위","type":"text"},
             {"name":"price_wons","label":"가격(원)","type":"number","value":0},
             {"name":"status","label":"상태","type":"select","options":[("active","active"),("inactive","inactive"),("archived","archived")]}]
     return render_form(request,"SW 제품 추가",fields,"/sw_products/new")
 
 @app.post("/sw_products/new")
-def sw_products_new_submit(request: Request, db: OrmSession = Depends(get_db),
-                           sw_name: str = Form(...), sw_func: Optional[str] = Form(None), price_wons: int = Form(0),
-                           status: str = Form("active")):
+def sw_products_new_submit(
+    request: Request, db: OrmSession = Depends(get_db),
+    sw_code: str = Form(...), sw_name: str = Form(...), sw_func: Optional[str] = Form(None),
+    unit: Optional[str] = Form(None), price_wons: int = Form(0), status: str = Form("active")
+):
     require_login(request)
-    db.add(SWProduct(sw_name=sw_name.strip(), sw_func=sw_func, price_wons=price_wons, status=status)); db.commit()
+    db.add(SWProduct(sw_code=sw_code.strip().upper(), sw_name=sw_name.strip(),
+                     sw_func=sw_func, unit=unit, price_wons=price_wons, status=status))
+    db.commit()
     return RedirectResponse(url="/sw_products", status_code=HTTP_302_FOUND)
 
 @app.get("/sw_products/edit/{pid}", response_class=HTMLResponse)
 def sw_products_edit(request: Request, pid: int, db: OrmSession = Depends(get_db)):
     require_login(request)
     p = db.get(SWProduct, pid); assert p
-    fields=[{"name":"sw_name","label":"제품명","type":"text","required":True,"value":p.sw_name},
+    fields=[{"name":"sw_code","label":"제품코드","type":"text","required":True,"value":p.sw_code},
+            {"name":"sw_name","label":"제품명","type":"text","required":True,"value":p.sw_name},
             {"name":"sw_func","label":"기능설명","type":"textarea","value":p.sw_func or ""},
+            {"name":"unit","label":"단위","type":"text","value":p.unit or ""},
             {"name":"price_wons","label":"가격(원)","type":"number","value":p.price_wons},
             {"name":"status","label":"상태","type":"select","options":[("active","active"),("inactive","inactive"),("archived","archived")],"value":p.status}]
     return render_form(request,"SW 제품 수정",fields,f"/sw_products/edit/{pid}")
 
 @app.post("/sw_products/edit/{pid}")
-def sw_products_edit_submit(request: Request, pid: int, db: OrmSession = Depends(get_db),
-                            sw_name: str = Form(...), sw_func: Optional[str] = Form(None), price_wons: int = Form(0),
-                            status: str = Form("active")):
+def sw_products_edit_submit(
+    request: Request, pid: int, db: OrmSession = Depends(get_db),
+    sw_code: str = Form(...), sw_name: str = Form(...), sw_func: Optional[str] = Form(None),
+    unit: Optional[str] = Form(None), price_wons: int = Form(0), status: str = Form("active")
+):
     require_login(request)
     p = db.get(SWProduct, pid); assert p
-    p.sw_name=sw_name.strip(); p.sw_func=sw_func; p.price_wons=price_wons; p.status=status
+    p.sw_code=sw_code.strip().upper(); p.sw_name=sw_name.strip()
+    p.sw_func=sw_func; p.unit=unit; p.price_wons=price_wons; p.status=status
     db.commit()
     return RedirectResponse(url="/sw_products", status_code=HTTP_302_FOUND)
 
-@app.post("/sw_products/delete/{pid'")
+@app.post("/sw_products/delete/{pid}")
 def sw_products_delete(request: Request, pid: int, db: OrmSession = Depends(get_db)):
     require_login(request)
     p = db.get(SWProduct, pid)
@@ -1078,8 +1097,10 @@ def sw_services_list(request: Request, db: OrmSession = Depends(get_db), sw_id: 
     require_login(request)
     q = db.query(SWService).join(SWProduct)
     if sw_id: q = q.filter(SWService.sw_id == sw_id)
-    rows=[[s.sv_id, f"[{s.product.sw_name}] {s.sv_name}", s.sv_type, s.price_wons, s.status] for s in q.order_by(SWProduct.sw_name, SWService.sv_name).all()]
-    return render_list(request,"서비스",["ID","서비스명","유형","가격(원)","상태"],rows,{
+    rows=[[s.sv_id, f"[{s.product.sw_code}] {s.product.sw_name} / {s.sv_code} / {s.sv_name}",
+           s.sv_type, s.price_wons, s.status, s.created_at]
+          for s in q.order_by(SWProduct.sw_name, SWService.sv_name).all()]
+    return render_list(request,"서비스",["ID","서비스(제품/코드/이름)","유형","가격(원)","상태","생성"],rows,{
         "new":"/sw_services/new","edit":"/sw_services/edit/{id}","delete":"/sw_services/delete/{id}"
     })
 
@@ -1087,6 +1108,7 @@ def sw_services_list(request: Request, db: OrmSession = Depends(get_db), sw_id: 
 def sw_services_new(request: Request, db: OrmSession = Depends(get_db), sw_id: Optional[int] = None):
     require_login(request)
     fields=[{"name":"sw_id","label":"제품","type":"select","options":options_sw_products(db),"value":sw_id or ""},
+            {"name":"sv_code","label":"서비스코드","type":"text","required":True},
             {"name":"sv_name","label":"서비스명","type":"text","required":True},
             {"name":"sv_type","label":"유형","type":"select","options":[("A","A"),("B","B"),("C","C")]},
             {"name":"price_wons","label":"가격(원)","type":"number","value":0},
@@ -1094,11 +1116,15 @@ def sw_services_new(request: Request, db: OrmSession = Depends(get_db), sw_id: O
     return render_form(request,"서비스 추가",fields,"/sw_services/new")
 
 @app.post("/sw_services/new")
-def sw_services_new_submit(request: Request, db: OrmSession = Depends(get_db),
-                           sw_id: int = Form(...), sv_name: str = Form(...), sv_type: str = Form("A"),
-                           price_wons: int = Form(0), status: str = Form("active")):
+def sw_services_new_submit(
+    request: Request, db: OrmSession = Depends(get_db),
+    sw_id: int = Form(...), sv_code: str = Form(...), sv_name: str = Form(...),
+    sv_type: str = Form("A"), price_wons: int = Form(0), status: str = Form("active")
+):
     require_login(request)
-    db.add(SWService(sw_id=sw_id, sv_name=sv_name.strip(), sv_type=sv_type, price_wons=price_wons, status=status)); db.commit()
+    db.add(SWService(sw_id=sw_id, sv_code=sv_code.strip().upper(), sv_name=sv_name.strip(),
+                     sv_type=sv_type, price_wons=price_wons, status=status))
+    db.commit()
     return RedirectResponse(url="/sw_services", status_code=HTTP_302_FOUND)
 
 @app.get("/sw_services/edit/{sid}", response_class=HTMLResponse)
@@ -1106,6 +1132,7 @@ def sw_services_edit(request: Request, sid: int, db: OrmSession = Depends(get_db
     require_login(request)
     s = db.get(SWService, sid); assert s
     fields=[{"name":"sw_id","label":"제품","type":"select","options":options_sw_products(db),"value":s.sw_id},
+            {"name":"sv_code","label":"서비스코드","type":"text","required":True,"value":s.sv_code},
             {"name":"sv_name","label":"서비스명","type":"text","required":True,"value":s.sv_name},
             {"name":"sv_type","label":"유형","type":"select","options":[("A","A"),("B","B"),("C","C")],"value":s.sv_type},
             {"name":"price_wons","label":"가격(원)","type":"number","value":s.price_wons},
@@ -1113,12 +1140,15 @@ def sw_services_edit(request: Request, sid: int, db: OrmSession = Depends(get_db
     return render_form(request,"서비스 수정",fields,f"/sw_services/edit/{sid}")
 
 @app.post("/sw_services/edit/{sid}")
-def sw_services_edit_submit(request: Request, sid: int, db: OrmSession = Depends(get_db),
-                            sw_id: int = Form(...), sv_name: str = Form(...), sv_type: str = Form("A"),
-                            price_wons: int = Form(0), status: str = Form("active")):
+def sw_services_edit_submit(
+    request: Request, sid: int, db: OrmSession = Depends(get_db),
+    sw_id: int = Form(...), sv_code: str = Form(...), sv_name: str = Form(...),
+    sv_type: str = Form("A"), price_wons: int = Form(0), status: str = Form("active")
+):
     require_login(request)
     s = db.get(SWService, sid); assert s
-    s.sw_id=sw_id; s.sv_name=sv_name.strip(); s.sv_type=sv_type; s.price_wons=price_wons; s.status=status
+    s.sw_id=sw_id; s.sv_code=sv_code.strip().upper(); s.sv_name=sv_name.strip()
+    s.sv_type=sv_type; s.price_wons=price_wons; s.status=status
     db.commit()
     return RedirectResponse(url="/sw_services", status_code=HTTP_302_FOUND)
 
