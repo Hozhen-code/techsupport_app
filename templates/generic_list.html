@@ -1,6 +1,21 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} - NAIZ{% endblock %}
 
+{% block head %}
+<style>
+  /* 정렬 표시용 미니 아이콘(기존 테이블 스타일은 건드리지 않음) */
+  .table thead th { position: relative; user-select: none; }
+  .table thead th.nosort { cursor: default; }
+  .table thead th.sortable { cursor: pointer; }
+  .table thead th .sort-ind {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    font-size: 11px; color: #9aa0a6;
+  }
+  .table thead th.sort-asc  .sort-ind::after { content: "▲"; }
+  .table thead th.sort-desc .sort-ind::after { content: "▼"; }
+</style>
+{% endblock %}
+
 {% block content %}
 <h1 class="mb-2">{{ title }}</h1>
 
@@ -10,11 +25,17 @@
       {% if routes.new %}<a href="{{ routes.new }}" class="btn btn-primary btn-small">+ 등록</a>{% endif %}
     </div>
 
-    <table class="table">
+    <table class="table" id="grid">
       <thead>
         <tr>
-          {% for h in headers %}<th>{{ h }}</th>{% endfor %}
-          {% if routes.edit or routes.delete or routes.child %}<th>작업</th>{% endif %}
+          {% for h in headers %}
+            <th class="sortable" data-col="{{ loop.index0 }}">
+              {{ h }} <span class="sort-ind"></span>
+            </th>
+          {% endfor %}
+          {% if routes.edit or routes.delete or routes.child %}
+            <th class="nosort">작업</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -46,4 +67,69 @@
     </table>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const table = document.getElementById('grid');
+  if (!table) return;
+
+  const getText = (cell) => (cell.textContent || '').trim();
+
+  // 열 타입 추정: number / date(YYYY-MM-DD [HH:MM:SS]) / string
+  const detectType = (idx) => {
+    const rows = Array.from(table.tBodies[0].rows);
+    for (const tr of rows) {
+      const v = getText(tr.cells[idx]);
+      if (!v) continue;
+      if (/^-?\d+(?:\.\d+)?$/.test(v)) return 'number';
+      if (/^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?$/.test(v)) return 'date';
+    }
+    return 'string';
+  };
+
+  const comparators = {
+    number: (a,b)=> (parseFloat(a)||0) - (parseFloat(b)||0),
+    date:   (a,b)=> (new Date(a)).getTime() - (new Date(b)).getTime(),
+    string: (a,b)=> a.localeCompare(b)
+  };
+
+  const clearIndicators = () => {
+    table.querySelectorAll('thead th').forEach(th=>{
+      th.classList.remove('sort-asc','sort-desc');
+    });
+  };
+
+  table.tHead.addEventListener('click', (e)=>{
+    const th = e.target.closest('th');
+    if (!th || th.classList.contains('nosort') || !th.classList.contains('sortable')) return;
+
+    const idx = parseInt(th.dataset.col, 10);
+    const type = detectType(idx);
+    const dir  = th.classList.contains('sort-asc') ? 'desc' : 'asc';
+
+    clearIndicators();
+    th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');
+
+    const tbody = table.tBodies[0];
+    const rows = Array.from(tbody.rows).map((tr, i)=>({
+      key: getText(tr.cells[idx]),
+      tr, i
+    }));
+
+    const cmp = comparators[type] || comparators.string;
+
+    rows.sort((A, B)=>{
+      const base = cmp(A.key, B.key);
+      // 안정 정렬(동일 값이면 기존 순서 유지)
+      return dir === 'asc' ? (base || (A.i - B.i)) : (-(base) || (A.i - B.i));
+    });
+
+    const frag = document.createDocumentFragment();
+    rows.forEach(r=>frag.appendChild(r.tr));
+    tbody.appendChild(frag);
+  });
+})();
+</script>
 {% endblock %}

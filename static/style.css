@@ -5,6 +5,7 @@
   --radius:14px; --radius-sm:10px;
   --container:1180px; --control-h:38px;
 }
+
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial}
@@ -12,40 +13,50 @@ body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-ap
 /* ---- 레이아웃 ---- */
 .container{max-width:var(--container);margin:0 auto;padding:18px 16px}
 main{padding-top:10px}
+.spacer{flex:1 1 auto} /* 필요 시 배치 조절에 사용 */
 
 /* ---- 헤더/내비 ---- */
-.site-header{position:sticky;top:0;background:rgba(255,255,255,.85);backdrop-filter:saturate(180%) blur(8px);
-  border-bottom:1px solid var(--border); z-index:10}
+.site-header{
+  position:sticky;top:0;background:rgba(255,255,255,.85);
+  backdrop-filter:saturate(180%) blur(8px);
+  border-bottom:1px solid var(--border); z-index:10
+}
 .nav{display:flex;align-items:center;gap:18px;white-space:nowrap}
-.brand{font-weight:800;font-size:16px;margin-right:auto}
 .nav a{display:inline-block;padding:12px 6px;color:#3f4d67;text-decoration:none;border-radius:8px}
 .nav a:hover{background:#f2f4f8}
 .nav a.active{color:var(--brand);font-weight:700}
+
+/* --- 헤더 로고 --- */
+.brand-link{display:flex;align-items:center;gap:10px;margin-right:8px;text-decoration:none;color:inherit}
+.brand-logo{height:24px;display:block}
+@media (max-width:480px){.brand-logo{height:20px}}
+/* 기본은 로고만 보이고, 이미지 로드 실패시 텍스트 폴백 */
+.brand-title{display:none;font-weight:800;font-size:16px}
+.brand-link.no-logo .brand-title{display:block}
 
 /* ---- 카드/패널 ---- */
 .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 .25rem .75rem rgba(0,0,0,.05)}
 .card-body{padding:16px}
 
 /* ---- 버튼 ---- */
-.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;padding:0 14px;border-radius:12px;border:1px solid transparent;cursor:pointer}
-.btn:disabled{opacity:.6;cursor:not-allowed}
-.btn-primary{background:var(--brand-weak);color:#fff}
-.btn-outline{background:#fff;border-color:var(--border);color:#1f2937}
-.btn-danger{background:var(--danger);color:#fff}
-.btn-small{height:30px;border-radius:10px;padding:0 10px}
-
-/* 링크 버튼 밑줄 제거 */
-.btn,
-.btn:hover,
-.btn:focus,
-.btn:active {
-  text-decoration: none;
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  height:40px;padding:0 14px;border-radius:12px;border:1px solid transparent;cursor:pointer;
+  background:#fff;color:#1f2937
 }
-
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.btn-primary{background:var(--brand-weak);color:#fff;border-color:transparent}
+.btn-outline{background:#fff;border-color:var(--border);color:#1f2937}
+.btn-danger{background:var(--danger);color:#fff;border-color:transparent}
+.btn-small{height:30px;border-radius:10px;padding:0 10px}
+/* 링크 버튼 밑줄 제거 (+등록 / +일정 등록 등) */
+.btn, .btn:hover, .btn:focus, .btn:active,
+a.btn, a.btn:hover, a.btn:focus, a.btn:active { text-decoration:none }
 
 /* ---- 폼 ---- */
 label{font-weight:600;margin-bottom:6px;display:block}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}
 @media (max-width:780px){.form-row{grid-template-columns:1fr}}
 .form-control, select, textarea{
   width:100%;border:1px solid var(--border);border-radius:12px;background:#fff;color:var(--text);
@@ -54,14 +65,19 @@ label{font-weight:600;margin-bottom:6px;display:block}
 textarea{min-height:100px;resize:vertical}
 .input-group{display:flex;gap:8px}
 .input-group > .form-control{flex:1}
+.form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 .help{color:var(--muted);font-size:12px}
 
-/* ---- 테이블 ---- */
-.table{width:100%;border-collapse:separate;border-spacing:0;background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.table th,.table td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left}
+/* ---- 테이블 (generic_list) ---- */
+.table{
+  width:100%;border-collapse:separate;border-spacing:0;background:var(--panel);
+  border:1px solid var(--border);border-radius:12px;overflow:hidden
+}
+.table th,.table td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
 .table th{background:#f4f6fb;color:#475569;font-weight:700}
-.table tr:hover td{background:#fafbff}
+.table tbody tr:hover td{background:#fafbff}
 .table .actions{display:flex;gap:8px}
+.nowrap{white-space:nowrap}
 
 /* ---- 배지 ---- */
 .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border);background:#fff}
@@ -69,19 +85,16 @@ textarea{min-height:100px;resize:vertical}
 .badge.warn{border-color:#fde68a;background:#fffbeb;color:#92400e}
 .badge.danger{border-color:#fecaca;background:#fef2f2;color:#991b1b}
 
+/* ---- 캘린더 필터 라인(있을 때) ---- */
+.filter-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+.filter-bar .btn{height:36px}
+
+/* ---- 알림/에러 ---- */
+.alert{padding:10px 12px;border-radius:10px;margin:10px 0;border:1px solid #fecaca;background:#fef2f2;color:#991b1b}
+.alert.ok{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
+
 /* ---- 유틸 ---- */
 .mt-1{margin-top:8px}.mt-2{margin-top:14px}.mt-3{margin-top:20px}
 .mb-1{margin-bottom:8px}.mb-2{margin-bottom:14px}.mb-3{margin-bottom:20px}
 .text-right{text-align:right}.text-center{text-align:center}
-
-/* --- 헤더 로고 스타일 --- */
-.brand-link{display:flex;align-items:center;gap:10px;margin-right:auto;text-decoration:none;color:inherit}
-.brand-logo{height:24px;display:block}
-@media (max-width:480px){.brand-logo{height:20px}}
-
-/* 기본은 로고만 보이고, 이미지 로드 실패시 텍스트 폴백 */
-.brand-title{display:none;font-weight:800;font-size:16px}
-.brand-link.no-logo .brand-title{display:block}
-
-
 .muted{color:var(--muted)}

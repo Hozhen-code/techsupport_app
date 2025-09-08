@@ -4,41 +4,58 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}NAIZ{% endblock %}</title>
+
+  <!-- 메인 스타일 -->
   <link rel="stylesheet" href="/static/style.css">
+
+  <!-- 아주 최소한의 폴백(외부 CSS 로드 실패해도 헤더가 무너지지 않도록) -->
+  <style>
+    .site-header{background:#fff;border-bottom:1px solid #e5e7eb}
+    .container{max-width:1180px;margin:0 auto;padding:0 16px}
+    .nav{display:flex;align-items:center;gap:18px;height:56px}
+    .brand-link{display:flex;align-items:center;gap:10px;margin-right:8px;text-decoration:none}
+    .brand-logo{height:22px}
+    .brand-title{display:none;color:#111827;font-weight:700}
+    .brand-link.no-logo .brand-title{display:block}
+    .nav a{color:#1f2937;text-decoration:none;padding:6px 8px;border-radius:8px}
+    .nav a.active{color:#2563eb;font-weight:700}
+    .nav a:last-child{margin-left:auto}
+    main.container{padding:18px 0}
+  </style>
+
   {% block head %}{% endblock %}
 </head>
 <body>
   <header class="site-header">
     <div class="container nav">
-      <!-- 로고: 클릭하면 캘린더로 이동. 이미지가 없으면 텍스트로 폴백 -->
-      <a href="/calendar" class="brand brand-link" aria-label="NAIZ 홈으로">
-        <img src="/static/img/logo.png"
-             alt="NAIZ"
-             class="brand-logo"
+      <!-- 로고(이미지 실패 시 텍스트 노출) -->
+      <a href="/calendar" class="brand-link" aria-label="NAIZ 홈으로">
+        <img src="/static/img/logo.png" alt="NAIZ" class="brand-logo"
              onerror="this.closest('.brand-link').classList.add('no-logo'); this.remove()">
         <span class="brand-title">NAIZ 전산프로그램</span>
       </a>
 
       {% set p = request.url.path %}
-      <a href="/calendar" class="{% if p.startswith('/calendar') %}active{% endif %}">캘린더</a>
-      <a href="/cs_requests" class="{% if p.startswith('/cs_requests') %}active{% endif %}">CS요청</a>
-      <a href="/cs_schedules" class="{% if p.startswith('/cs_schedules') %}active{% endif %}">CS일정</a>
-      <a href="/sites" class="{% if p.startswith('/sites') and not p.startswith('/site_locations') %}active{% endif %}">현장</a>
+      <a href="/calendar"       class="{% if p.startswith('/calendar') %}active{% endif %}">캘린더</a>
+      <a href="/cs_requests"    class="{% if p.startswith('/cs_requests') %}active{% endif %}">CS요청</a>
+      <a href="/cs_schedules"   class="{% if p.startswith('/cs_schedules') %}active{% endif %}">CS일정</a>
+      <a href="/sites"          class="{% if p.startswith('/sites') and not p.startswith('/site_locations') %}active{% endif %}">현장</a>
       <a href="/site_locations" class="{% if p.startswith('/site_locations') %}active{% endif %}">상세현장</a>
-      <a href="/employees" class="{% if p.startswith('/employees') %}active{% endif %}">직원</a>
-      <a href="/departments" class="{% if p.startswith('/departments') %}active{% endif %}">부서</a>
-      <a href="/job_ranks" class="{% if p.startswith('/job_ranks') %}active{% endif %}">직급</a>
-      <a href="/roles" class="{% if p.startswith('/roles') %}active{% endif %}">권한</a>
-      <a href="/vendors" class="{% if p.startswith('/vendors') %}active{% endif %}">협력사</a>
-      <a href="/sw_products" class="{% if p.startswith('/sw_products') %}active{% endif %}">SW</a>
-      <a href="/sw_services" class="{% if p.startswith('/sw_services') %}active{% endif %}">서비스</a>
-      <a href="/logout" style="margin-left:auto">로그아웃</a>
+      <a href="/employees"      class="{% if p.startswith('/employees') %}active{% endif %}">직원</a>
+      <a href="/departments"    class="{% if p.startswith('/departments') %}active{% endif %}">부서</a>
+      <a href="/job_ranks"      class="{% if p.startswith('/job_ranks') %}active{% endif %}">직급</a>
+      <a href="/roles"          class="{% if p.startswith('/roles') %}active{% endif %}">권한</a>
+      <a href="/vendors"        class="{% if p.startswith('/vendors') %}active{% endif %}">협력사</a>
+      <a href="/sw_products"    class="{% if p.startswith('/sw_products') %}active{% endif %}">SW</a>
+      <a href="/sw_services"    class="{% if p.startswith('/sw_services') %}active{% endif %}">서비스</a>
+      <a href="/logout">로그아웃</a>
     </div>
   </header>
 
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+
   {% block scripts %}{% endblock %}
 </body>
 </html>
