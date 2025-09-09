@@ -44,6 +44,19 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
+def _comma(v):
+    if v is None or v == "":
+        return ""
+    try:
+        # 정수/문자 정수
+        return f"{int(v):,}"
+    except Exception:
+        try:
+            # 소수도 반올림해서 표시 (원단위라면 int로 캐스팅)
+            return f"{float(v):,.0f}"
+        except Exception:
+            return str(v)
+templates.env.filters["comma"] = _comma
 
 # ------------------------------------------------------------------------------
 # DB 초기화 (SQLite FK 강제)
@@ -69,6 +82,14 @@ def get_db() -> OrmSession:
         yield db
     finally:
         db.close()
+
+def _to_int_or_none(v):
+    if v is None or v == "" or v == "None":
+        return None
+    try:
+        return int(v)
+    except Exception:
+        return None
 
 
 # ------------------------------------------------------------------------------
@@ -422,10 +443,34 @@ def events_json(
 # ------------------------------------------------------------------------------
 # 제네릭 렌더
 # ------------------------------------------------------------------------------
-def render_list(request: Request, title: str, headers: List[str], rows: List[List[Any]], routes: Dict[str, str]):
+def render_list(request: Request, title, headers, rows, routes):
+    # headers: str | (label, class) | {"label":..., "bold":bool, "align":"left|center|right", "class":"..."}
+    norm_headers = []
+    for h in headers:
+        if isinstance(h, str):
+            norm_headers.append({"label": h, "class": "th-center"})  # 기본: 가운데, 기본 굵기
+        elif isinstance(h, tuple):
+            label = h[0]
+            cls = (h[1] if len(h) > 1 else "th-center")
+            norm_headers.append({"label": label, "class": cls.strip()})
+        elif isinstance(h, dict):
+            label = h.get("label") or h.get("text") or ""
+            align = {"left": "th-left", "right": "th-right", "center": "th-center"}.get(h.get("align", "center"), "th-center")
+            extra = h.get("class", "")
+            bold = "th-bold" if h.get("bold") else ""
+            cls = " ".join(c for c in [align, bold, extra] if c)
+            norm_headers.append({"label": label, "class": cls})
+        else:
+            norm_headers.append({"label": str(h), "class": "th-center"})
+
     return templates.TemplateResponse("generic_list.html", {
-        "request": request, "title": title, "headers": headers, "rows": rows, "routes": routes
+        "request": request,
+        "title": title,
+        "headers": norm_headers,  # ← 정규화된 헤더
+        "rows": rows,
+        "routes": routes
     })
+
 
 def render_form(request: Request, title: str, fields: List[Dict[str, Any]], action: str, method: str = "post"):
     return templates.TemplateResponse("generic_form.html", {
@@ -976,24 +1021,53 @@ def cs_schedules_new(request: Request, db: OrmSession = Depends(get_db)):
 @app.post("/cs_schedules/new")
 def cs_schedules_new_submit(
     request: Request, db: OrmSession = Depends(get_db),
-    request_id: Optional[int] = Form(None), site_id: Optional[int] = Form(None),
-    start_date: str = Form(...), end_date: Optional[str] = Form(None),
-    request_content: Optional[str] = Form(None), work_content: Optional[str] = Form(None),
-    extra_content: Optional[str] = Form(None), status: str = Form("todo"), note: Optional[str] = Form(None),
-    locations: Optional[List[int]] = Form(None), assignees: Optional[List[int]] = Form(None)
+    request_id: Optional[str] = Form(None),
+    site_id:    Optional[str] = Form(None),
+    start_date: str = Form(...),
+    end_date:   Optional[str] = Form(None),
+    request_content: Optional[str] = Form(None),
+    work_content:    Optional[str] = Form(None),
+    extra_content:   Optional[str] = Form(None),
+    status: str = Form("todo"),
+    note:   Optional[str] = Form(None),
+    locations: Optional[List[int]] = Form(None),
+    assignees: Optional[List[int]] = Form(None),
 ):
     require_login(request)
-    s = CSSchedule(request_id=request_id or None, site_id=site_id or None, start_date=start_date, end_date=(end_date or None),
-                   request_content=request_content, work_content=work_content, extra_content=extra_content, status=status, note=note)
+
+    # ⬇️ 빈 문자열을 None으로 변환
+    request_id_i = _to_int_or_none(request_id)
+    site_id_i    = _to_int_or_none(site_id)
+
+    s = CSSchedule(
+        request_id=request_id_i,
+        site_id=site_id_i,
+        start_date=start_date,
+        end_date=end_date or None,
+        request_content=request_content,
+        work_content=work_content,
+        extra_content=extra_content,
+        status=status,
+        note=note
+    )
     db.add(s); db.commit(); db.refresh(s)
+
+    # 다중 선택들 처리
     if locations:
-        if isinstance(locations, str): locations = [locations]
-        for lid in locations: db.add(CSScheduleLocation(schedule_id=s.schedule_id, location_id=int(lid)))
+        if isinstance(locations, str):  # 단일값 케이스 방어
+            locations = [locations]
+        for lid in locations:
+            db.add(CSScheduleLocation(schedule_id=s.schedule_id, location_id=int(lid)))
+
     if assignees:
-        if isinstance(assignees, str): assignees = [assignees]
-        for eid in assignees: db.add(CSScheduleAssignee(schedule_id=s.schedule_id, emp_id=int(eid)))
+        if isinstance(assignees, str):
+            assignees = [assignees]
+        for eid in assignees:
+            db.add(CSScheduleAssignee(schedule_id=s.schedule_id, emp_id=int(eid)))
+
     db.commit()
     return RedirectResponse(url="/cs_schedules", status_code=HTTP_302_FOUND)
+
 
 @app.get("/cs_schedules/edit/{sid}", response_class=HTMLResponse)
 def cs_schedules_edit(request: Request, sid: int, db: OrmSession = Depends(get_db)):
@@ -1017,26 +1091,52 @@ def cs_schedules_edit(request: Request, sid: int, db: OrmSession = Depends(get_d
 @app.post("/cs_schedules/edit/{sid}")
 def cs_schedules_edit_submit(
     request: Request, sid: int, db: OrmSession = Depends(get_db),
-    request_id: Optional[int] = Form(None), site_id: Optional[int] = Form(None),
-    start_date: str = Form(...), end_date: Optional[str] = Form(None),
-    request_content: Optional[str] = Form(None), work_content: Optional[str] = Form(None),
-    extra_content: Optional[str] = Form(None), status: str = Form("todo"), note: Optional[str] = Form(None),
-    locations: Optional[List[int]] = Form(None), assignees: Optional[List[int]] = Form(None)
+    request_id: Optional[str] = Form(None),
+    site_id:    Optional[str] = Form(None),
+    start_date: str = Form(...),
+    end_date:   Optional[str] = Form(None),
+    request_content: Optional[str] = Form(None),
+    work_content:    Optional[str] = Form(None),
+    extra_content:   Optional[str] = Form(None),
+    status: str = Form("todo"),
+    note:   Optional[str] = Form(None),
+    locations: Optional[List[int]] = Form(None),
+    assignees: Optional[List[int]] = Form(None),
 ):
     require_login(request)
+
+    request_id_i = _to_int_or_none(request_id)
+    site_id_i    = _to_int_or_none(site_id)
+
     s = db.get(CSSchedule, sid); assert s
-    s.request_id=request_id or None; s.site_id=site_id or None; s.start_date=start_date; s.end_date=end_date or None
-    s.request_content=request_content; s.work_content=work_content; s.extra_content=extra_content; s.status=status; s.note=note
-    db.query(CSScheduleLocation).filter(CSScheduleLocation.schedule_id==sid).delete()
+    s.request_id = request_id_i
+    s.site_id    = site_id_i
+    s.start_date = start_date
+    s.end_date   = end_date or None
+    s.request_content = request_content
+    s.work_content    = work_content
+    s.extra_content   = extra_content
+    s.status = status
+    s.note   = note
+
+    # 다대다 갱신
+    db.query(CSScheduleLocation).filter(CSScheduleLocation.schedule_id == sid).delete()
     if locations:
-        if isinstance(locations, str): locations = [locations]
-        for lid in locations: db.add(CSScheduleLocation(schedule_id=sid, location_id=int(lid)))
-    db.query(CSScheduleAssignee).filter(CSScheduleAssignee.schedule_id==sid).delete()
+        if isinstance(locations, str):
+            locations = [locations]
+        for lid in locations:
+            db.add(CSScheduleLocation(schedule_id=sid, location_id=int(lid)))
+
+    db.query(CSScheduleAssignee).filter(CSScheduleAssignee.schedule_id == sid).delete()
     if assignees:
-        if isinstance(assignees, str): assignees = [assignees]
-        for eid in assignees: db.add(CSScheduleAssignee(schedule_id=sid, emp_id=int(eid)))
+        if isinstance(assignees, str):
+            assignees = [assignees]
+        for eid in assignees:
+            db.add(CSScheduleAssignee(schedule_id=sid, emp_id=int(eid)))
+
     db.commit()
     return RedirectResponse(url="/cs_schedules", status_code=HTTP_302_FOUND)
+
 
 @app.post("/cs_schedules/delete/{sid}")
 def cs_schedules_delete(request: Request, sid: int, db: OrmSession = Depends(get_db)):
@@ -1121,6 +1221,15 @@ def sw_services_list(request: Request, db: OrmSession = Depends(get_db), sw_id: 
     if sw_id: q = q.filter(SWService.sw_id == sw_id)
     rows=[[s.sv_id, s.product.sw_name, s.sv_code, s.sv_name, s.sv_type, s.price_wons, s.status]
           for s in q.order_by(SWService.sv_id.asc()).all()]
+    headers = [
+        "ID",
+        {"label": "제품", "align": "center", "bold": True},
+        {"label": "서비스코드", "align": "center"},
+        {"label": "서비스명", "align": "center", "bold":True},
+        {"label": "유형", "align": "center"},
+        {"label": "가격(원)",   "align": "right",  "bold": True, "format": "money"},
+        {"label": "상태", "align": "center"},
+    ]
     return render_list(request,"서비스",["ID","제품","서비스코드","서비스명","유형","가격(원)","상태"],rows,{
         "new":"/sw_services/new","edit":"/sw_services/edit/{id}","delete":"/sw_services/delete/{id}"
     })

@@ -29,12 +29,10 @@
       <thead>
         <tr>
           {% for h in headers %}
-            <th class="sortable" data-col="{{ loop.index0 }}">
-              {{ h }} <span class="sort-ind"></span>
-            </th>
+            <th class="{{ h.class }}">{{ h.label }}</th>
           {% endfor %}
           {% if routes.edit or routes.delete or routes.child %}
-            <th class="nosort">작업</th>
+            <th>작업</th>
           {% endif %}
         </tr>
       </thead>
