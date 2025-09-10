@@ -1,53 +1,286 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} - NAIZ{% endblock %}
 
+{% block head %}
+<style>
+  /* === 인라인 콤보박스(검색+드롭다운 한 칸) === */
+  .combo-one{ position:relative; }
+  .combo-one .combobox-input{ width:100%; }
+  .combo-one .combobox-list{
+    position:absolute; left:0; right:0; top:100%;
+    background:#fff; border:1px solid var(--border, #e7e9ef);
+    border-radius:12px; margin-top:6px; max-height:260px; overflow:auto;
+    box-shadow:0 .5rem 1rem rgba(0,0,0,.06); z-index:20;
+  }
+  .combo-one .combobox-item{ padding:8px 12px; cursor:pointer; }
+  .combo-one .combobox-item:hover{ background:#f6f7fb; }
+  .combo-one .hidden-native{ display:none; } /* 실제 제출되는 select는 숨김 */
+
+  /* (선택) 길게 열린 리스트가 카드 밖으로 나가도 가려지지 않도록 */
+  .card-body{ overflow:visible; }
+</style>
+{% endblock %}
+
 {% block content %}
 <h1 class="mb-2">{{ title }}</h1>
 
 <div class="card">
   <div class="card-body">
-    <form action="{{ action }}" method="{{ method|default('post') }}">
-      <div class="form-row">
-        {% for f in fields %}
-        <div class="mb-2" style="min-width:0">
-          <label for="{{ f.name }}">{{ f.label }}</label>
 
-          {% set val = f.value if f.value is defined else '' %}
+    <form method="{{ method|default('post') }}" action="{{ action }}" enctype="application/x-www-form-urlencoded">
 
-          {% if f.type == 'textarea' %}
-            <textarea id="{{ f.name }}" name="{{ f.name }}" class="form-control" {% if f.required %}required{% endif %}>{{ val }}</textarea>
+      {% for f in fields %}
+      <div class="mb-2">
+        {% if f.label %}<label for="{{ f.name }}">{{ f.label }}</label>{% endif %}
 
-          {% elif f.type == 'select' %}
-            <select id="{{ f.name }}" name="{{ f.name }}" class="form-control">
-              {% if f.nullable %}<option value=""></option>{% endif %}
-              {% for oid, label in f.options %}
-                <option value="{{ oid }}" {% if (val|string) == (oid|string) %}selected{% endif %}>{{ label }}</option>
+        {# ---------------------------- #
+           단일 입력(input 계열)
+           f.type: text | number | date | password | color
+           ---------------------------- #}
+        {% if f.type in ['text','number','date','password','color'] %}
+          <input
+            id="{{ f.name }}"
+            name="{{ f.name }}"
+            type="{{ f.type }}"
+            class="form-control {{ f.class or '' }}"
+            value="{{ f.value if f.value is not none else '' }}"
+            {% if f.required %}required{% endif %}
+            {% if f.min is defined %}min="{{ f.min }}"{% endif %}
+            {% if f.max is defined %}max="{{ f.max }}"{% endif %}
+            {% if f.step is defined %}step="{{ f.step }}"{% endif %}
+            {% if f.attrs is defined %}
+              {% for k, v in f.attrs.items() %} {{k}}="{{v}}"{% endfor %}
+            {% endif %}
+          >
+
+        {# ---------------------------- #
+           여러 줄 입력
+           f.type: textarea
+           ---------------------------- #}
+        {% elif f.type == 'textarea' %}
+          <textarea
+            id="{{ f.name }}"
+            name="{{ f.name }}"
+            class="form-control {{ f.class or '' }}"
+            {% if f.required %}required{% endif %}
+            {% if f.rows %}rows="{{ f.rows }}"{% else %}rows="4"{% endif %}>{{ f.value or '' }}</textarea>
+
+        {# ---------------------------- #
+           단일 선택
+           f.type: select
+           추가 옵션:
+             - f.search: true         → 상단에 검색창 + 아래 select(두 칸형)
+             - f.search_inline: true  → 한 칸짜리 콤보박스(검색+목록)
+             - f.search_placeholder: placeholder 문구
+             - f.nullable: True면 빈 옵션 허용
+           ---------------------------- #}
+        {% elif f.type == 'select' %}
+          {% if f.search_inline %}
+            {# === 한 칸짜리 검색형 콤보박스 === #}
+            {% set selected_label = '' %}
+            {% if f.value is not none %}
+              {% for val, text in f.options %}
+                {% if (val|string) == (f.value|string) %}
+                  {% set selected_label = text %}
+                {% endif %}
               {% endfor %}
-            </select>
+            {% endif %}
 
-          {% elif f.type == 'multiselect' %}
-            {% set cur = val if val is iterable and (val is not string) else [val] %}
-            <select id="{{ f.name }}" name="{{ f.name }}" class="form-control" multiple size="8">
-              {% for oid, label in f.options %}
-                <option value="{{ oid }}" {% if (oid in cur) or ((oid|string) in (cur|map('string')|list)) %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-            <div class="help">Ctrl/Shift 로 다중 선택</div>
+            <div class="combo-one" data-name="{{ f.name }}">
+              <!-- 보이는 입력창 -->
+              <input type="text"
+                     class="form-control combobox-input {{ f.class or '' }}"
+                     placeholder="{{ f.search_placeholder or '검색… (일부만 입력해도 됩니다)' }}"
+                     value="{{ selected_label }}">
+
+              <!-- 드롭다운 목록 -->
+              <div class="combobox-list" hidden>
+                {% if f.nullable %}
+                  <div class="combobox-item" data-val="">(비어 있음)</div>
+                {% endif %}
+                {% for val, text in f.options %}
+                  <div class="combobox-item" data-val="{{ val }}">{{ text }}</div>
+                {% endfor %}
+              </div>
+
+              <!-- 실제 제출되는 select (숨김) -->
+              <select id="{{ f.name }}" name="{{ f.name }}" class="hidden-native" {% if f.required %}required{% endif %}>
+                {% if f.nullable %}<option value=""></option>{% endif %}
+                {% for val, text in f.options %}
+                  <option value="{{ val }}"
+                    {% if f.value is not none and (val|string) == (f.value|string) %}selected{% endif %}>
+                    {{ text }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
 
           {% else %}
-            <input id="{{ f.name }}" name="{{ f.name }}" class="form-control"
-                   {% if f.type %}type="{{ f.type }}"{% else %}type="text"{% endif %}
-                   value="{{ val }}" {% if f.required %}required{% endif %}>
+            {# === 기존 두 칸형: 위에 검색, 아래 select === #}
+            {% if f.search %}
+              <input
+                type="text"
+                class="form-control mb-1 combosearch"
+                placeholder="{{ f.search_placeholder or '검색… (일부만 입력해도 됩니다)' }}"
+                data-target="{{ f.name }}"
+                autocomplete="off">
+            {% endif %}
+            <select
+              id="{{ f.name }}"
+              name="{{ f.name }}"
+              class="form-control {{ f.class or '' }}"
+              {% if f.required %}required{% endif %}>
+              {% if f.nullable %}<option value=""></option>{% endif %}
+              {% for val, text in f.options %}
+                <option value="{{ val }}"
+                  {% if f.value is not none and (val|string) == (f.value|string) %}selected{% endif %}>
+                  {{ text }}
+                </option>
+              {% endfor %}
+            </select>
           {% endif %}
-        </div>
-        {% endfor %}
-      </div>
 
-      <div class="mt-2">
+        {# ---------------------------- #
+           다중 선택
+           f.type: multiselect
+           추가 옵션:
+             - f.search: true → 상단 검색으로 옵션 필터
+             - f.size: 보이는 행 수 (기본 6)
+           ---------------------------- #}
+        {% elif f.type == 'multiselect' %}
+          {% if f.search %}
+            <input
+              type="text"
+              class="form-control mb-1 combosearch"
+              placeholder="{{ f.search_placeholder or '검색… (일부만 입력해도 됩니다)' }}"
+              data-target="{{ f.name }}"
+              autocomplete="off">
+          {% endif %}
+          {% set selected_list = f.value if f.value is not none else [] %}
+          <select
+            id="{{ f.name }}"
+            name="{{ f.name }}"
+            multiple
+            class="form-control {{ f.class or '' }}"
+            {% if f.size %}size="{{ f.size }}"{% else %}size="6"{% endif %}>
+            {% for val, text in f.options %}
+              <option value="{{ val }}"
+                {% if val in selected_list or (val|string) in selected_list %}selected{% endif %}>
+                {{ text }}
+              </option>
+            {% endfor %}
+          </select>
+
+        {# ---------------------------- #
+           기본(text) 폴백
+           ---------------------------- #}
+        {% else %}
+          <input
+            id="{{ f.name }}"
+            name="{{ f.name }}"
+            type="text"
+            class="form-control {{ f.class or '' }}"
+            value="{{ f.value if f.value is not none else '' }}">
+        {% endif %}
+
+        {% if f.help %}<div class="muted" style="margin-top:6px">{{ f.help }}</div>{% endif %}
+      </div>
+      {% endfor %}
+
+      <div class="mt-2" style="display:flex; gap:8px;">
         <button class="btn btn-primary" type="submit">저장</button>
         <a class="btn btn-outline" href="javascript:history.back()">취소</a>
       </div>
     </form>
+
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* === (1) 두 칸형 combosearch: 위 인풋으로 아래 select/multiselect 옵션을 필터 === */
+(function(){
+  function attachSearch(input){
+    var targetId = input.getAttribute('data-target');
+    var sel = document.getElementById(targetId);
+    if(!sel) return;
+
+    var all = Array.from(sel.options); // 원본 옵션 캐시
+
+    function doFilter(){
+      var term = (input.value || '').toLowerCase().trim();
+      all.forEach(function(opt){ opt.hidden = false; });
+      if(!term) return;
+      all.forEach(function(opt){
+        var txt = (opt.textContent || '').toLowerCase();
+        opt.hidden = !txt.includes(term);
+      });
+    }
+    input.addEventListener('input', doFilter);
+  }
+  document.querySelectorAll('.combosearch').forEach(attachSearch);
+})();
+
+/* === (2) 한 칸형 인라인 콤보박스 === */
+(function(){
+  document.querySelectorAll('.combo-one').forEach(function(box){
+    var input = box.querySelector('.combobox-input');
+    var list  = box.querySelector('.combobox-list');
+    var sel   = box.querySelector('select.hidden-native');
+    if(!input || !list || !sel) return;
+
+    var items = Array.from(list.querySelectorAll('.combobox-item'));
+
+    function openList(){ list.hidden = false; }
+    function closeListSoon(){ setTimeout(function(){ list.hidden = true; }, 120); }
+
+    function filter(){
+      var term = (input.value || '').toLowerCase().trim();
+      items.forEach(function(it){
+        var txt = (it.textContent || '').toLowerCase();
+        it.hidden = term && !txt.includes(term);
+      });
+      openList();
+    }
+
+    function choose(val, label){
+      Array.from(sel.options).forEach(function(o){ o.selected = (o.value == val); });
+      input.value = label || '';
+      list.hidden = true;
+    }
+
+    // 초기 표시 라벨을 select 선택값과 동기화
+    var selOpt = sel.querySelector('option:checked');
+    if(selOpt) input.value = selOpt.textContent || '';
+
+    input.addEventListener('focus', openList);
+    input.addEventListener('input', filter);
+    input.addEventListener('blur', closeListSoon);
+
+    items.forEach(function(it){
+      it.addEventListener('mousedown', function(e){
+        e.preventDefault(); // blur 전에 값 반영
+        choose(it.getAttribute('data-val'), it.textContent);
+      });
+    });
+
+    // 키보드 네비 (↓/↑/Enter)
+    var idx = -1;
+    input.addEventListener('keydown', function(e){
+      if(list.hidden) return;
+      var visible = items.filter(function(i){ return !i.hidden; });
+      if(e.key === 'ArrowDown'){ idx = Math.min(idx+1, visible.length-1); e.preventDefault(); highlight(); }
+      else if(e.key === 'ArrowUp'){ idx = Math.max(idx-1, 0); e.preventDefault(); highlight(); }
+      else if(e.key === 'Enter' && idx >= 0){ e.preventDefault();
+        var it = visible[idx]; choose(it.getAttribute('data-val'), it.textContent);
+      }
+      function highlight(){
+        items.forEach(i=>i.style.background='');
+        if(visible[idx]) visible[idx].style.background='#f6f7fb';
+      }
+    });
+  });
+})();
+</script>
 {% endblock %}

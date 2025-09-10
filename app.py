@@ -90,6 +90,15 @@ def _to_int_or_none(v):
         return int(v)
     except Exception:
         return None
+    
+def default_color(status: str) -> str:
+    s = (status or "").lower()
+    return {
+        "todo":        "#3b82f6",  # 파랑
+        "in_progress": "#f59e0b",  # 주황
+        "done":        "#10b981",  # 초록
+        "lab_request": "#8b5cf6",  # 보라
+    }.get(s, "#3b82f6")
 
 
 # ------------------------------------------------------------------------------
@@ -219,6 +228,7 @@ class CSSchedule(Base):
     extra_content = Column(Text)
     status = Column(String, nullable=False, default="todo")
     note = Column(Text)
+    color  = Column(String)
     created_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
     updated_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
     site = relationship("Site")
@@ -378,67 +388,113 @@ def calendar_page(request: Request, db: OrmSession = Depends(get_db)):
     })
 
 @app.get("/events", response_class=PlainTextResponse)
-@app.get("/api/events", response_class=PlainTextResponse)  # 구버전 경로 호환
+@app.get("/api/events", response_class=PlainTextResponse)
 def events_json(
     request: Request,
     db: OrmSession = Depends(get_db),
     start: Optional[str] = None,
     end: Optional[str] = None,
     site_id: Optional[int] = None,
-    assignee: Optional[int] = None,
+    assignee: Optional[int] = None,  # emp_id
     status: Optional[str] = None,
     q: Optional[str] = None,
 ):
     require_login(request)
+
     qset = db.query(CSSchedule).outerjoin(Site)
 
-    def parse_d(s: Optional[str]):
-        if not s:
+    # '2025-09-05' 또는 '2025-09-05T...' 형태 모두 허용
+    def _parse(d: Optional[str]) -> Optional[str]:
+        if not d:
             return None
         try:
-            return date.fromisoformat(s[:10])
+            return date.fromisoformat(d[:10]).isoformat()
         except Exception:
             return None
 
-    if start and parse_d(start):
-        qset = qset.filter(CSSchedule.start_date >= parse_d(start).isoformat())
-    if end and parse_d(end):
-        qset = qset.filter(CSSchedule.start_date <= parse_d(end).isoformat())
+    s = _parse(start)
+    e = _parse(end)
+    if s:
+        qset = qset.filter(CSSchedule.start_date >= s)
+    if e:
+        qset = qset.filter(CSSchedule.start_date <= e)
     if site_id:
         qset = qset.filter(CSSchedule.site_id == site_id)
     if status:
         qset = qset.filter(CSSchedule.status == status)
     if assignee:
-        qset = qset.join(CSScheduleAssignee, CSSchedule.schedule_id == CSScheduleAssignee.schedule_id)\
-                   .filter(CSScheduleAssignee.emp_id == assignee)
+        qset = (
+            qset.join(
+                CSScheduleAssignee,
+                CSSchedule.schedule_id == CSScheduleAssignee.schedule_id,
+            )
+            .filter(CSScheduleAssignee.emp_id == assignee)
+        )
     if q:
         like = f"%{q}%"
-        qset = qset.filter(or_(CSSchedule.request_content.ilike(like),
-                               CSSchedule.work_content.ilike(like),
-                               CSSchedule.extra_content.ilike(like),
-                               Site.name.ilike(like)))
+        qset = qset.filter(
+            or_(
+                CSSchedule.request_content.ilike(like),
+                CSSchedule.work_content.ilike(like),
+                CSSchedule.extra_content.ilike(like),
+                Site.name.ilike(like),
+            )
+        )
 
     rows = qset.order_by(CSSchedule.start_date.asc()).all()
+
+    # 글자색 자동 대비(밝은 배경이면 진한 글자, 어두우면 흰 글자)
+    def _text_on(bg: Optional[str]) -> str:
+        try:
+            h = (bg or "").lstrip("#")
+            if len(h) != 6:
+                return "#111"
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            yiq = (r * 299 + g * 587 + b * 114) / 1000
+            return "#111" if yiq >= 160 else "#fff"
+        except Exception:
+            return "#111"
+
     payload = []
     for r in rows:
         assignees = [a.employee.name for a in r.sch_assignees]
-        title_src = r.work_content or r.request_content or "(내용 없음)"
         site_name = r.site.name if r.site else "-"
-        title = f"[{site_name}] {title_src}"
-        payload.append({
-            "id": r.schedule_id,
-            "title": title,
-            "start": r.start_date,
-            "end": (r.end_date or r.start_date),
-            "extendedProps": {
-                "status": r.status,
-                "site_id": r.site_id,
-                "assignees": assignees,
-                "note": r.note or ""
-            }
-        })
-    return PlainTextResponse(content=json.dumps(payload), media_type="application/json; charset=utf-8")
+        # 셀에 보이는 텍스트는 "현장 + 담당자들"
+        title = f"[{site_name}] " + (", ".join(assignees) if assignees else "")
 
+        # 색상: 개별 지정 > 상태 기본색
+        evt_color = (r.color or "").strip() or default_color(r.status)
+
+        payload.append(
+            {
+                "id": r.schedule_id,
+                "title": title,
+                "start": r.start_date,
+                "end": r.end_date or r.start_date,
+                # FullCalendar 색상 속성들
+                "color": evt_color,                 # 단일 지정
+                "backgroundColor": evt_color,       # 보강
+                "borderColor": evt_color,           # 보강
+                "textColor": _text_on(evt_color),   # 가독성
+                # 클릭/팝오버에서 사용할 추가 정보
+                "extendedProps": {
+                    "site_id": r.site_id,
+                    "site_name": site_name,
+                    "status": r.status,
+                    "assignees": assignees,
+                    "request_content": r.request_content or "",
+                    "work_content": r.work_content or "",
+                    "extra_content": r.extra_content or "",
+                    "note": r.note or "",
+                    "color": evt_color,
+                },
+            }
+        )
+
+    return PlainTextResponse(
+        content=json.dumps(payload, ensure_ascii=False),
+        media_type="application/json; charset=utf-8",
+    )
 
 # ------------------------------------------------------------------------------
 # 제네릭 렌더
@@ -929,7 +985,7 @@ def cs_requests_list(request: Request, db: OrmSession = Depends(get_db)):
 @app.get("/cs_requests/new", response_class=HTMLResponse)
 def cs_requests_new(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    fields=[{"name":"site_id","label":"현장","type":"select","options":[(None,"")] + options_sites(db),"nullable":True},
+    fields=[{"name":"site_id","label":"현장","type":"select", "search_inline": True, "options":[(None,"")] + options_sites(db),"nullable":True},
             {"name":"requester_name","label":"요청자","type":"text","required":True},
             {"name":"content","label":"요청 내용","type":"textarea","required":True},
             {"name":"status","label":"상태","type":"select","options":[("requested","requested"),("accepted","accepted"),("rejected","rejected"),("scheduled","scheduled")]},
@@ -957,7 +1013,7 @@ def cs_requests_edit(request: Request, rid: int, db: OrmSession = Depends(get_db
     require_login(request)
     r = db.get(CSRequest, rid); assert r
     curr = [rl.location_id for rl in r.req_locations]
-    fields=[{"name":"site_id","label":"현장","type":"select","options":[(None,"")] + options_sites(db),"value":r.site_id or ""},
+    fields=[{"name":"site_id","label":"현장","type":"select","search_inline": True,"options":[(None,"")] + options_sites(db),"value":r.site_id or ""},
             {"name":"requester_name","label":"요청자","type":"text","required":True,"value":r.requester_name},
             {"name":"content","label":"요청 내용","type":"textarea","required":True,"value":r.content},
             {"name":"status","label":"상태","type":"select","options":[("requested","requested"),("accepted","accepted"),("rejected","rejected"),("scheduled","scheduled")],"value":r.status},
@@ -1004,9 +1060,9 @@ def cs_schedules_list(request: Request, db: OrmSession = Depends(get_db)):
 @app.get("/cs_schedules/new", response_class=HTMLResponse)
 def cs_schedules_new(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    fields=[{"name":"request_id","label":"요청ID","type":"select",
+    fields=[{"name":"request_id","label":"요청ID","type":"select","search_inline": True,
              "options":[(None,"")] + [(r.request_id, f"{r.request_id}: {r.requester_name}") for r in db.query(CSRequest).order_by(CSRequest.request_id.desc()).all()],"nullable":True},
-            {"name":"site_id","label":"현장","type":"select","options":[(None,"")] + options_sites(db),"nullable":True},
+            {"name":"site_id","label":"현장","type":"select","search_inline": True,"options":[(None,"")] + options_sites(db),"nullable":True},
             {"name":"start_date","label":"시작일","type":"date","required":True,"value":date.today().isoformat()},
             {"name":"end_date","label":"종료일","type":"date"},
             {"name":"request_content","label":"요청 요약","type":"textarea"},
@@ -1014,6 +1070,7 @@ def cs_schedules_new(request: Request, db: OrmSession = Depends(get_db)):
             {"name":"extra_content","label":"추가 내용","type":"textarea"},
             {"name":"status","label":"상태","type":"select","options":[("todo","todo"),("in_progress","in_progress"),("done","done"),("lab_request","lab_request")]},
             {"name":"note","label":"비고","type":"textarea"},
+            {"name":"color","label":"표시 색상","type":"color","value":"#3b82f6"},
             {"name":"locations","label":"상세현장(복수)","type":"multiselect","options":options_site_locations(db)},
             {"name":"assignees","label":"담당자(복수)","type":"multiselect","options":options_employees(db)}]
     return render_form(request,"CS 일정 등록",fields,"/cs_schedules/new")
@@ -1030,14 +1087,18 @@ def cs_schedules_new_submit(
     extra_content:   Optional[str] = Form(None),
     status: str = Form("todo"),
     note:   Optional[str] = Form(None),
+    color: Optional[str] = Form(None),
     locations: Optional[List[int]] = Form(None),
     assignees: Optional[List[int]] = Form(None),
 ):
     require_login(request)
 
-    # ⬇️ 빈 문자열을 None으로 변환
+    # 빈 문자열을 None으로 변환
     request_id_i = _to_int_or_none(request_id)
     site_id_i    = _to_int_or_none(site_id)
+
+    # color를 빈값을 받으면 기본색
+    color_val = (color or "").strip() or default_color(status)
 
     s = CSSchedule(
         request_id=request_id_i,
@@ -1048,7 +1109,8 @@ def cs_schedules_new_submit(
         work_content=work_content,
         extra_content=extra_content,
         status=status,
-        note=note
+        note=note,
+        color=color_val
     )
     db.add(s); db.commit(); db.refresh(s)
 
@@ -1075,8 +1137,8 @@ def cs_schedules_edit(request: Request, sid: int, db: OrmSession = Depends(get_d
     s = db.get(CSSchedule, sid); assert s
     cur_locs = [sl.location_id for sl in s.sch_locations]
     cur_emps = [sa.emp_id for sa in s.sch_assignees]
-    fields=[{"name":"request_id","label":"요청ID","type":"select","options":[(None,"")] + [(r.request_id, f"{r.request_id}: {r.requester_name}") for r in db.query(CSRequest).order_by(CSRequest.request_id.desc()).all()],"value":s.request_id or ""},
-            {"name":"site_id","label":"현장","type":"select","options":[(None,"")] + options_sites(db),"value":s.site_id or ""},
+    fields=[{"name":"request_id","label":"요청ID","type":"select","search_inline": True,"options":[(None,"")] + [(r.request_id, f"{r.request_id}: {r.requester_name}") for r in db.query(CSRequest).order_by(CSRequest.request_id.desc()).all()],"value":s.request_id or ""},
+            {"name":"site_id","label":"현장","type":"select","search_inline": True,"options":[(None,"")] + options_sites(db),"value":s.site_id or ""},
             {"name":"start_date","label":"시작일","type":"date","required":True,"value":s.start_date},
             {"name":"end_date","label":"종료일","type":"date","value":s.end_date or ""},
             {"name":"request_content","label":"요청 요약","type":"textarea","value":s.request_content or ""},
@@ -1084,6 +1146,7 @@ def cs_schedules_edit(request: Request, sid: int, db: OrmSession = Depends(get_d
             {"name":"extra_content","label":"추가 내용","type":"textarea","value":s.extra_content or ""},
             {"name":"status","label":"상태","type":"select","options":[("todo","todo"),("in_progress","in_progress"),("done","done"),("lab_request","lab_request")],"value":s.status},
             {"name":"note","label":"비고","type":"textarea","value":s.note or ""},
+            {"name":"color","label":"표시 색상","type":"color","value": s.color or default_color(s.status)},
             {"name":"locations","label":"상세현장(복수)","type":"multiselect","options":options_site_locations(db),"value":cur_locs},
             {"name":"assignees","label":"담당자(복수)","type":"multiselect","options":options_employees(db),"value":cur_emps}]
     return render_form(request,"CS 일정 수정",fields,f"/cs_schedules/edit/{sid}")
@@ -1100,6 +1163,7 @@ def cs_schedules_edit_submit(
     extra_content:   Optional[str] = Form(None),
     status: str = Form("todo"),
     note:   Optional[str] = Form(None),
+    color: Optional[str] = Form(None),
     locations: Optional[List[int]] = Form(None),
     assignees: Optional[List[int]] = Form(None),
 ):
@@ -1118,6 +1182,7 @@ def cs_schedules_edit_submit(
     s.extra_content   = extra_content
     s.status = status
     s.note   = note
+    s.color  = (color or "").strip() or default_color(status)
 
     # 다대다 갱신
     db.query(CSScheduleLocation).filter(CSScheduleLocation.schedule_id == sid).delete()

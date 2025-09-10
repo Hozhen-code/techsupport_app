@@ -1,8 +1,22 @@
 {% extends "base.html" %}
 {% block title %}캘린더 - NAIZ{% endblock %}
+
 {% block head %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/main.min.css">
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+<!-- 한국어 로캘 -->
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/locales-all.global.min.js"></script>
+<style>
+  /* 필터 바 정렬 */
+  .form-row{
+    display:grid;
+    grid-template-columns: repeat(4, minmax(180px, 1fr)) auto;
+    gap:12px;
+    align-items:end;
+  }
+  /* 캘린더 높이 자동(카드 안에서 스크롤 안 생기게) */
+  #calendar{ min-height: 600px; }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -12,7 +26,7 @@
   <div class="card-body">
     <div class="form-row">
       <div>
-        <label>현장</label>
+        <label for="fSite">현장</label>
         <select id="fSite" class="form-control">
           <option value="">전체</option>
           {% for sid, sname in sites %}
@@ -20,8 +34,9 @@
           {% endfor %}
         </select>
       </div>
+
       <div>
-        <label>담당자</label>
+        <label for="fAssignee">담당자</label>
         <select id="fAssignee" class="form-control">
           <option value="">전체</option>
           {% for eid, ename in employees %}
@@ -29,8 +44,9 @@
           {% endfor %}
         </select>
       </div>
+
       <div>
-        <label>상태</label>
+        <label for="fStatus">상태</label>
         <select id="fStatus" class="form-control">
           <option value="">전체</option>
           {% for st in statuses %}
@@ -38,12 +54,14 @@
           {% endfor %}
         </select>
       </div>
+
       <div>
-        <label>검색</label>
+        <label for="fQ">검색</label>
         <input id="fQ" class="form-control" placeholder="내용/현장명">
       </div>
+
       <div style="align-self:end">
-        <button id="btnReload" class="btn btn-outline">적용</button>
+        <button id="btnReload" type="button" class="btn btn-outline">적용</button>
         <a class="btn btn-primary" href="/cs_schedules/new">+ 일정 등록</a>
       </div>
     </div>
@@ -59,16 +77,24 @@
 
 {% block scripts %}
 <script>
+  // 파라미터 빌더
   function buildQuery(params) {
     const usp = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== "") usp.set(k, v) });
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") usp.set(k, v);
+    });
     return usp.toString();
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    const calendarEl = document.getElementById('calendar');
+    const elCal = document.getElementById('calendar');
+    const elSite = document.getElementById('fSite');
+    const elAssn = document.getElementById('fAssignee');
+    const elStat = document.getElementById('fStatus');
+    const elQ    = document.getElementById('fQ');
+    const btn    = document.getElementById('btnReload');
 
-    const calendar = new FullCalendar.Calendar(calendarEl, {
+    const calendar = new FullCalendar.Calendar(elCal, {
       locale: 'ko',
       initialView: 'dayGridMonth',
       height: 'auto',
@@ -78,33 +104,48 @@
         right: 'dayGridMonth,timeGridWeek,timeGridDay'
       },
       navLinks: true,
-      eventSources: [{
-        events: function(info, success, failure){
-          const qs = buildQuery({
-            start: info.startStr,
-            end: info.endStr,
-            site_id: document.getElementById('fSite').value,
-            assignee: document.getElementById('fAssignee').value,
-            status: document.getElementById('fStatus').value,
-            q: document.getElementById('fQ').value
-          });
-          fetch('/api/events?' + qs)
-            .then(r => r.json())
-            .then(data => success(data))
-            .catch(err => failure(err));
-        }
-      }],
+
+      // 서버에서 이벤트 로드 (필터 반영)
+      events: function(info, success, failure){
+        const qs = buildQuery({
+          start: info.startStr,
+          end: info.endStr,
+          site_id: elSite.value,
+          assignee: elAssn.value,
+          status: elStat.value,
+          q: elQ.value
+        });
+        fetch('/api/events?' + qs, { cache: 'no-store' })
+          .then(r => r.json())
+          .then(data => success(data))  // data 안의 color, title, extendedProps 사용
+          .catch(err => failure(err));
+      },
+
+      // 셀 안 제목은 API에서 이미 "[현장] 담당자들"로 내려옴
+      // 클릭 시 상세 정보 표시
       eventClick: function(info){
         const p = info.event.extendedProps || {};
         alert(
-          `[${p.status || ''}] ${info.event.title}\n` +
-          `시작: ${info.event.startStr}\n종료: ${info.event.endStr}\n담당: ${(p.assignees || []).join(', ')}`
+          `[${p.site_name || '-'}]\n` +
+          `상태: ${p.status || ''}\n담당: ${(p.assignees || []).join(', ')}\n\n` +
+          `요청: ${p.request_content || ''}\n` +
+          `작업: ${p.work_content || ''}\n` +
+          `추가: ${p.extra_content || ''}\n` +
+          `비고: ${p.note || ''}`
         );
       }
     });
 
     calendar.render();
-    document.getElementById('btnReload').addEventListener('click', () => calendar.refetchEvents());
+
+    // 적용 버튼/셀렉트 변경/검색 엔터 → 재조회
+    btn.addEventListener('click', () => calendar.refetchEvents());
+    [elSite, elAssn, elStat].forEach(sel => {
+      sel.addEventListener('change', () => calendar.refetchEvents());
+    });
+    elQ.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); calendar.refetchEvents(); }
+    });
   });
 </script>
 {% endblock %}
