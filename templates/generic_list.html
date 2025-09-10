@@ -29,19 +29,37 @@
       <thead>
         <tr>
           {% for h in headers %}
-            <th class="{{ h.class }}">{{ h.label }}</th>
+            {% set is_sortable = (h.nosort is not defined) or (not h.nosort) %}
+            <th
+              class="{{ h.class }} {% if is_sortable %}sortable{% else %}nosort{% endif %}"
+              data-col="{{ loop.index0 }}"
+            >
+              {{ h.label }}
+              <span class="sort-ind"></span>
+            </th>
           {% endfor %}
           {% if routes.edit or routes.delete or routes.child %}
-            <th>작업</th>
+            <th class="th-center nosort">작업</th>
           {% endif %}
         </tr>
       </thead>
       <tbody>
         {% for row in rows %}
         <tr>
-          {% for col in row %}<td>{{ col }}</td>{% endfor %}
+          {% for col in row %}
+            {% set meta = headers[loop.index0] if headers|length > loop.index0 else {} %}
+            {% set td_cls = meta.td_class if meta.td_class is defined else '' %}
+            <td class="{{ td_cls }}">
+              {% if meta.format in ['money','int'] %}
+                {{ col|comma }}
+              {% else %}
+                {{ col }}
+              {% endif %}
+            </td>
+          {% endfor %}
+
           {% if routes.edit or routes.delete or routes.child %}
-          <td class="actions">
+          <td class="actions td-center">
             {% if routes.child %}
               <a class="btn btn-outline btn-small" href="{{ routes.child|replace('{id}', row[0]|string) }}">자세히</a>
             {% endif %}
@@ -81,6 +99,7 @@
     for (const tr of rows) {
       const v = getText(tr.cells[idx]);
       if (!v) continue;
+      if (/^-?\d{1,3}(?:,\d{3})*(?:\.\d+)?$/.test(v)) return 'number'; // 1,234 형식도 숫자로
       if (/^-?\d+(?:\.\d+)?$/.test(v)) return 'number';
       if (/^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?$/.test(v)) return 'date';
     }
@@ -88,7 +107,7 @@
   };
 
   const comparators = {
-    number: (a,b)=> (parseFloat(a)||0) - (parseFloat(b)||0),
+    number: (a,b)=> (parseFloat(a.replace(/,/g,''))||0) - (parseFloat(b.replace(/,/g,''))||0),
     date:   (a,b)=> (new Date(a)).getTime() - (new Date(b)).getTime(),
     string: (a,b)=> a.localeCompare(b)
   };

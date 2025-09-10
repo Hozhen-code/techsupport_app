@@ -7,14 +7,12 @@
 <!-- 한국어 로캘 -->
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/locales-all.global.min.js"></script>
 <style>
-  /* 필터 바 정렬 */
   .form-row{
     display:grid;
     grid-template-columns: repeat(4, minmax(180px, 1fr)) auto;
     gap:12px;
     align-items:end;
   }
-  /* 캘린더 높이 자동(카드 안에서 스크롤 안 생기게) */
   #calendar{ min-height: 600px; }
 </style>
 {% endblock %}
@@ -62,7 +60,9 @@
 
       <div style="align-self:end">
         <button id="btnReload" type="button" class="btn btn-outline">적용</button>
-        <a class="btn btn-primary" href="/cs_schedules/new">+ 일정 등록</a>
+        {% if 'TECH' in roles or 'MASTER' in roles %}
+          <a class="btn btn-primary" href="/cs_schedules/new">+ 일정 등록</a>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -77,7 +77,6 @@
 
 {% block scripts %}
 <script>
-  // 파라미터 빌더
   function buildQuery(params) {
     const usp = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
@@ -104,8 +103,6 @@
         right: 'dayGridMonth,timeGridWeek,timeGridDay'
       },
       navLinks: true,
-
-      // 서버에서 이벤트 로드 (필터 반영)
       events: function(info, success, failure){
         const qs = buildQuery({
           start: info.startStr,
@@ -117,12 +114,9 @@
         });
         fetch('/api/events?' + qs, { cache: 'no-store' })
           .then(r => r.json())
-          .then(data => success(data))  // data 안의 color, title, extendedProps 사용
+          .then(data => success(data))
           .catch(err => failure(err));
       },
-
-      // 셀 안 제목은 API에서 이미 "[현장] 담당자들"로 내려옴
-      // 클릭 시 상세 정보 표시
       eventClick: function(info){
         const p = info.event.extendedProps || {};
         alert(
@@ -137,15 +131,9 @@
     });
 
     calendar.render();
-
-    // 적용 버튼/셀렉트 변경/검색 엔터 → 재조회
     btn.addEventListener('click', () => calendar.refetchEvents());
-    [elSite, elAssn, elStat].forEach(sel => {
-      sel.addEventListener('change', () => calendar.refetchEvents());
-    });
-    elQ.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); calendar.refetchEvents(); }
-    });
+    [elSite, elAssn, elStat].forEach(sel => sel.addEventListener('change', () => calendar.refetchEvents()));
+    elQ.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); calendar.refetchEvents(); }});
   });
 </script>
 {% endblock %}

@@ -28,6 +28,12 @@
 <body>
   <header class="site-header">
     <div class="container nav">
+      <!-- 로그인 사용자/권한 -->
+      {% set user  = request.session.get('user') or {} %}
+      {% set roles = user.get('roles', []) %}
+      {% set is_master = 'MASTER' in roles %}
+      {% set is_tech   = 'TECH' in roles %}
+
       <!-- 로고(이미지 실패 시 텍스트 노출) -->
       <a href="/calendar" class="brand-link" aria-label="NAIZ 홈으로">
         <img src="/static/img/logo.png" alt="NAIZ" class="brand-logo"
@@ -41,10 +47,15 @@
       <a href="/cs_schedules"   class="{% if p.startswith('/cs_schedules') %}active{% endif %}">CS일정</a>
       <a href="/sites"          class="{% if p.startswith('/sites') and not p.startswith('/site_locations') %}active{% endif %}">현장</a>
       <a href="/site_locations" class="{% if p.startswith('/site_locations') %}active{% endif %}">상세현장</a>
-      <a href="/employees"      class="{% if p.startswith('/employees') %}active{% endif %}">직원</a>
-      <a href="/departments"    class="{% if p.startswith('/departments') %}active{% endif %}">부서</a>
-      <a href="/job_ranks"      class="{% if p.startswith('/job_ranks') %}active{% endif %}">직급</a>
-      <a href="/roles"          class="{% if p.startswith('/roles') %}active{% endif %}">권한</a>
+
+      {# 전사관리자만 인사/조직 메뉴 노출 #}
+      {% if is_master %}
+        <a href="/employees"      class="{% if p.startswith('/employees') %}active{% endif %}">직원</a>
+        <a href="/departments"    class="{% if p.startswith('/departments') %}active{% endif %}">부서</a>
+        <a href="/job_ranks"      class="{% if p.startswith('/job_ranks') %}active{% endif %}">직급</a>
+        <a href="/roles"          class="{% if p.startswith('/roles') %}active{% endif %}">권한</a>
+      {% endif %}
+
       <a href="/vendors"        class="{% if p.startswith('/vendors') %}active{% endif %}">협력사</a>
       <a href="/sw_products"    class="{% if p.startswith('/sw_products') %}active{% endif %}">SW</a>
       <a href="/sw_services"    class="{% if p.startswith('/sw_services') %}active{% endif %}">서비스</a>

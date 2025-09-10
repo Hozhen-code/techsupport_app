@@ -98,3 +98,20 @@ textarea{min-height:100px;resize:vertical}
 .mb-1{margin-bottom:8px}.mb-2{margin-bottom:14px}.mb-3{margin-bottom:20px}
 .text-right{text-align:right}.text-center{text-align:center}
 .muted{color:var(--muted)}
+
+/* 기본 헤더 모양: 기본 좌측 정렬, 기본 굵기 */
+.table thead th {
+  text-align: left;
+  font-weight: 500;
+}
+
+/* 정렬/굵기 유틸(TH 전용 오버라이드: 특이성↑) */
+.table thead th.th-left   { text-align: left; }
+.table thead th.th-center { text-align: center; }
+.table thead th.th-right  { text-align: right; }
+.table thead th.th-bold   { font-weight: 700; }
+
+/* 선택: 데이터 셀 정렬도 맞추고 싶을 때 */
+.td-left   { text-align: left; }
+.td-center { text-align: center; }
+.td-right  { text-align: right; }

@@ -1,4 +1,4 @@
-# app.py — NAIZ 전산프로그램 (정렬 기본값/최신 DDL 반영판)
+# app.py — NAIZ 전산프로그램 (권한/정렬/포맷 반영판)
 import os
 import json
 from datetime import date
@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 
 
 # ------------------------------------------------------------------------------
-# 설정
+#// 설정
 # ------------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -44,22 +44,52 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
+# ★ 숫자 천단위 콤마 필터(포맷 정책 바꾸려면 여기 수정)
 def _comma(v):
     if v is None or v == "":
         return ""
     try:
-        # 정수/문자 정수
-        return f"{int(v):,}"
+        return f"{int(v):,}"          # 정수/문자 정수
     except Exception:
         try:
-            # 소수도 반올림해서 표시 (원단위라면 int로 캐스팅)
-            return f"{float(v):,.0f}"
+            return f"{float(v):,.0f}" # 소수도 반올림해서 표시 (원단위라면 int 취급)
         except Exception:
             return str(v)
 templates.env.filters["comma"] = _comma
 
 # ------------------------------------------------------------------------------
-# DB 초기화 (SQLite FK 강제)
+#// 권한 헬퍼 (세션 roles 사용)
+# ------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+#// 권한 헬퍼 (세션 roles 사용) — 단일 정의로 정리 (MASTER는 TECH 가드 통과)
+# --------------------------------------------------------------------------
+from typing import List
+
+def current_roles(request: Request):
+    return (request.session.get("user") or {}).get("roles", []) or []
+
+def has_role(request: Request, *codes: str) -> bool:
+    roles = set(r.upper() for r in current_roles(request))
+    return any((c or "").upper() in roles for c in codes)
+
+def require_login(request: Request):
+    if "user" not in request.session:
+        raise HTTPException(status_code=401, detail="Login required")
+
+def require_role_any(request: Request, *codes: str):
+    require_login(request)
+    if not has_role(request, *codes):
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
+def require_master(request: Request):
+    require_role_any(request, "MASTER")
+
+def require_tech(request: Request):
+    # ★ MASTER도 허용
+    require_role_any(request, "TECH", "MASTER")
+
+# ------------------------------------------------------------------------------
+#// DB 초기화 (SQLite FK 강제)
 # ------------------------------------------------------------------------------
 Base = declarative_base()
 engine = create_engine(
@@ -90,7 +120,7 @@ def _to_int_or_none(v):
         return int(v)
     except Exception:
         return None
-    
+
 def default_color(status: str) -> str:
     s = (status or "").lower()
     return {
@@ -102,7 +132,7 @@ def default_color(status: str) -> str:
 
 
 # ------------------------------------------------------------------------------
-# 모델 (최신 DDL 반영)
+#// 모델 (최신 DDL 반영)
 # ------------------------------------------------------------------------------
 class Department(Base):
     __tablename__ = "departments"
@@ -258,10 +288,10 @@ class CSHelp(Base):
 class SWProduct(Base):
     __tablename__ = "sw_products"
     sw_id = Column(Integer, primary_key=True)
-    sw_code = Column(String, unique=True, nullable=True)  # 선택적/유니크 코드
+    sw_code = Column(String, unique=True, nullable=True)
     sw_name = Column(String, nullable=False, unique=True)
     sw_func = Column(Text)
-    unit = Column(String)  # 단가 단위(선택)
+    unit = Column(String)
     price_wons = Column(Integer, nullable=False, default=0)
     status = Column(String, nullable=False, default="active")
     created_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
@@ -273,7 +303,7 @@ class SWService(Base):
     sw_id = Column(Integer, ForeignKey("sw_products.sw_id", ondelete="CASCADE"), nullable=False)
     sv_code = Column(String, unique=True, nullable=False)
     sv_name = Column(String, nullable=False)
-    sv_type = Column(String, nullable=False, default="A")  # CHECK는 DB가 수행
+    sv_type = Column(String, nullable=False, default="A")
     price_wons = Column(Integer, nullable=False, default=0)
     status = Column(String, nullable=False, default="active")
     created_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
@@ -283,7 +313,7 @@ class SWService(Base):
 
 
 # ------------------------------------------------------------------------------
-# DB 생성
+#// DB 생성
 # ------------------------------------------------------------------------------
 def init_db():
     Base.metadata.create_all(bind=engine)
@@ -294,7 +324,7 @@ def on_startup():
 
 
 # ------------------------------------------------------------------------------
-# 인증
+#// 인증
 # ------------------------------------------------------------------------------
 def verify_password_hash(pw: str, hash_str: str) -> bool:
     try:
@@ -332,8 +362,32 @@ def login_submit(request: Request, db: OrmSession = Depends(get_db),
     auth = db.execute(select(EmployeeAuth).where(EmployeeAuth.login_id == login_id)).scalar_one_or_none()
     if not auth or not verify_password_hash(password, auth.pw_hash):
         return templates.TemplateResponse("login.html", {"request": request, "error": "로그인 실패"})
-    request.session["user"] = {"login_id": login_id, "emp_id": auth.emp_id}
+
+    # ★ 로그인 시 역할코드들을 세션에 저장 (중복 제거 + 대문자 정규화)
+    role_codes = [
+        (row[0] or "").upper()
+        for row in (
+            db.query(Role.role_code)
+              .join(EmployeeRole, Role.role_id == EmployeeRole.role_id)
+              .filter(EmployeeRole.emp_id == auth.emp_id)
+              .distinct()
+              .all()
+        )
+    ]
+
+    # 템플릿/권한가드에서 쓰기 쉽게 플래그도 함께 저장(선택사항)
+    is_master = "MASTER" in role_codes
+    is_tech   = "TECH" in role_codes
+
+    request.session["user"] = {
+        "login_id": login_id,
+        "emp_id": auth.emp_id,
+        "roles": role_codes,   # 예: ["MASTER", "TECH"]
+        "is_master": is_master,
+        "is_tech": is_tech,
+    }
     return RedirectResponse(url="/calendar", status_code=HTTP_302_FOUND)
+
 
 @app.get("/logout")
 def logout(request: Request):
@@ -342,7 +396,7 @@ def logout(request: Request):
 
 
 # ------------------------------------------------------------------------------
-# 유틸: 셀렉트 옵션
+#// 유틸: 셀렉트 옵션
 # ------------------------------------------------------------------------------
 def options_sites(db: OrmSession):
     return [(s.site_id, s.name) for s in db.query(Site).order_by(Site.name).all()]
@@ -370,7 +424,7 @@ def options_sw_products(db: OrmSession):
 
 
 # ------------------------------------------------------------------------------
-# 캘린더(FullCalendar용)
+#// 캘린더(FullCalendar용)
 # ------------------------------------------------------------------------------
 @app.get("/", include_in_schema=False)
 def root():
@@ -385,6 +439,7 @@ def calendar_page(request: Request, db: OrmSession = Depends(get_db)):
         "employees": options_employees(db),
         "sites": options_sites(db),
         "statuses": statuses,
+        "roles": current_roles(request)  # 템플릿에서 버튼 노출 제어용(선택)
     })
 
 @app.get("/events", response_class=PlainTextResponse)
@@ -403,7 +458,6 @@ def events_json(
 
     qset = db.query(CSSchedule).outerjoin(Site)
 
-    # '2025-09-05' 또는 '2025-09-05T...' 형태 모두 허용
     def _parse(d: Optional[str]) -> Optional[str]:
         if not d:
             return None
@@ -424,11 +478,8 @@ def events_json(
         qset = qset.filter(CSSchedule.status == status)
     if assignee:
         qset = (
-            qset.join(
-                CSScheduleAssignee,
-                CSSchedule.schedule_id == CSScheduleAssignee.schedule_id,
-            )
-            .filter(CSScheduleAssignee.emp_id == assignee)
+            qset.join(CSScheduleAssignee, CSSchedule.schedule_id == CSScheduleAssignee.schedule_id)
+               .filter(CSScheduleAssignee.emp_id == assignee)
         )
     if q:
         like = f"%{q}%"
@@ -443,7 +494,6 @@ def events_json(
 
     rows = qset.order_by(CSSchedule.start_date.asc()).all()
 
-    # 글자색 자동 대비(밝은 배경이면 진한 글자, 어두우면 흰 글자)
     def _text_on(bg: Optional[str]) -> str:
         try:
             h = (bg or "").lstrip("#")
@@ -459,10 +509,7 @@ def events_json(
     for r in rows:
         assignees = [a.employee.name for a in r.sch_assignees]
         site_name = r.site.name if r.site else "-"
-        # 셀에 보이는 텍스트는 "현장 + 담당자들"
         title = f"[{site_name}] " + (", ".join(assignees) if assignees else "")
-
-        # 색상: 개별 지정 > 상태 기본색
         evt_color = (r.color or "").strip() or default_color(r.status)
 
         payload.append(
@@ -471,12 +518,10 @@ def events_json(
                 "title": title,
                 "start": r.start_date,
                 "end": r.end_date or r.start_date,
-                # FullCalendar 색상 속성들
-                "color": evt_color,                 # 단일 지정
-                "backgroundColor": evt_color,       # 보강
-                "borderColor": evt_color,           # 보강
-                "textColor": _text_on(evt_color),   # 가독성
-                # 클릭/팝오버에서 사용할 추가 정보
+                "color": evt_color,
+                "backgroundColor": evt_color,
+                "borderColor": evt_color,
+                "textColor": _text_on(evt_color),
                 "extendedProps": {
                     "site_id": r.site_id,
                     "site_name": site_name,
@@ -497,32 +542,61 @@ def events_json(
     )
 
 # ------------------------------------------------------------------------------
-# 제네릭 렌더
+#// 제네릭 렌더
 # ------------------------------------------------------------------------------
 def render_list(request: Request, title, headers, rows, routes):
-    # headers: str | (label, class) | {"label":..., "bold":bool, "align":"left|center|right", "class":"..."}
+    """
+    headers 원소 형식:
+      - "라벨"                       -> 기본 좌측 정렬, 정렬가능
+      - ("라벨", "th-right th-bold") -> 클래스 직접 지정
+      - {
+          "label": "라벨",
+          "align": "left|center|right",  # ★ TH 정렬 바꾸려면 여기 값 사용
+          "bold": True|False,            # ★ TH 볼드 여부
+          "class": "추가 TH 클래스",
+          "nosort": True|False,          # ★ 정렬 비활성
+          "format": "money|int|...",     # ★ 셀 포맷(templates/generic_list.html에서 적용)
+          "td_class": "td-right",        # ★ TD 클래스(셀 정렬/스타일)
+          # "td" / "cell_class" 도 동의어로 인식
+        }
+    """
+    # ★ 전역 기본: 모든 칼럼 헤더는 좌측정렬(th-left)
     norm_headers = []
     for h in headers:
+        base = {"label": "", "class": "th-left", "nosort": False, "format": None, "td_class": ""}
+
         if isinstance(h, str):
-            norm_headers.append({"label": h, "class": "th-center"})  # 기본: 가운데, 기본 굵기
+            base["label"] = h
+
         elif isinstance(h, tuple):
-            label = h[0]
-            cls = (h[1] if len(h) > 1 else "th-center")
-            norm_headers.append({"label": label, "class": cls.strip()})
+            base["label"] = h[0]
+            base["class"] = (h[1] if len(h) > 1 and h[1] else "th-left").strip()
+
         elif isinstance(h, dict):
             label = h.get("label") or h.get("text") or ""
-            align = {"left": "th-left", "right": "th-right", "center": "th-center"}.get(h.get("align", "center"), "th-center")
-            extra = h.get("class", "")
-            bold = "th-bold" if h.get("bold") else ""
-            cls = " ".join(c for c in [align, bold, extra] if c)
-            norm_headers.append({"label": label, "class": cls})
+            align = {"left": "th-left", "right": "th-right", "center": "th-center"} \
+                    .get(h.get("align", "left"), "th-left")
+            bold  = "th-bold" if h.get("bold") else ""
+            extra = (h.get("class") or "").strip()
+            th_cls = " ".join(c for c in [align, bold, extra] if c)
+
+            base.update({
+                "label":   label,
+                "class":   th_cls or "th-left",
+                "nosort":  bool(h.get("nosort", False)),
+                "format":  h.get("format"),
+                "td_class": (h.get("td_class") or h.get("td") or h.get("cell_class") or "").strip(),
+            })
+
         else:
-            norm_headers.append({"label": str(h), "class": "th-center"})
+            base["label"] = str(h)
+
+        norm_headers.append(base)
 
     return templates.TemplateResponse("generic_list.html", {
         "request": request,
         "title": title,
-        "headers": norm_headers,  # ← 정규화된 헤더
+        "headers": norm_headers,
         "rows": rows,
         "routes": routes
     })
@@ -535,24 +609,24 @@ def render_form(request: Request, title: str, fields: List[Dict[str, Any]], acti
 
 
 # ------------------------------------------------------------------------------
-# 조직: 부서 / 직급 / 권한 / 직원(+권한)
-#  - 기본 정렬: ID ASC
+#// 조직: 부서 / 직급 / 권한 / 직원(+권한)
+#//  - 기본 정렬: ID ASC
 # ------------------------------------------------------------------------------
 @app.get("/departments", response_class=HTMLResponse)
 def departments_list(request: Request, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     rows = []
     for d in db.query(Department).order_by(Department.dept_id.asc()).all():
         parent = db.get(Department, d.parent_id).name if d.parent_id else ""
         rows.append([d.dept_id, d.dept_code, d.name, parent, d.status, d.created_at])
-    headers = ["ID", "코드", "부서명", "상위부서", "상태", "생성"]
+    headers = ["ID", "코드", "부서명", "상위부서", "상태", "생성"]  # ★ 필요 시 dict로 포맷 지정
     return render_list(request, "부서", headers, rows, {
         "new": "/departments/new", "edit": "/departments/edit/{id}", "delete": "/departments/delete/{id}"
     })
 
 @app.get("/departments/new", response_class=HTMLResponse)
 def departments_new(request: Request, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     fields = [
         {"name": "dept_code", "label": "부서코드", "type": "text", "required": True},
         {"name": "name", "label": "부서명", "type": "text", "required": True},
@@ -569,7 +643,7 @@ def departments_new_submit(
     dept_code: str = Form(...), name: str = Form(...),
     parent_id: Optional[int] = Form(None), status: str = Form("active")
 ):
-    require_login(request)
+    require_login(request); require_master(request)
     d = Department(dept_code=dept_code.strip().upper(), name=name.strip(),
                    parent_id=parent_id or None, status=status)
     db.add(d); db.commit()
@@ -577,7 +651,7 @@ def departments_new_submit(
 
 @app.get("/departments/edit/{dept_id}", response_class=HTMLResponse)
 def departments_edit(request: Request, dept_id: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     d = db.get(Department, dept_id);  assert d
     fields = [
         {"name":"dept_code","label":"부서코드","type":"text","required":True,"value":d.dept_code},
@@ -593,7 +667,7 @@ def departments_edit_submit(
     dept_code: str = Form(...), name: str = Form(...),
     parent_id: Optional[int] = Form(None), status: str = Form("active")
 ):
-    require_login(request)
+    require_login(request); require_master(request)
     d = db.get(Department, dept_id);  assert d
     d.dept_code = dept_code.strip().upper(); d.name = name.strip()
     d.parent_id = parent_id or None; d.status = status
@@ -602,7 +676,7 @@ def departments_edit_submit(
 
 @app.post("/departments/delete/{dept_id}")
 def departments_delete(request: Request, dept_id: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     d = db.get(Department, dept_id)
     if d: db.delete(d); db.commit()
     return RedirectResponse(url="/departments", status_code=HTTP_302_FOUND)
@@ -610,7 +684,7 @@ def departments_delete(request: Request, dept_id: int, db: OrmSession = Depends(
 
 @app.get("/job_ranks", response_class=HTMLResponse)
 def job_ranks_list(request: Request, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     rows = [[r.rank_id, r.rank_code, r.name, r.created_at]
             for r in db.query(JobRank).order_by(JobRank.rank_id.asc()).all()]
     return render_list(request, "직급", ["ID","코드","이름","생성"], rows, {
@@ -619,7 +693,7 @@ def job_ranks_list(request: Request, db: OrmSession = Depends(get_db)):
 
 @app.get("/job_ranks/new", response_class=HTMLResponse)
 def job_ranks_new(request: Request):
-    require_login(request)
+    require_login(request); require_master(request)
     fields=[{"name":"rank_code","label":"코드","type":"text","required":True},
             {"name":"name","label":"이름","type":"text","required":True}]
     return render_form(request,"직급 추가",fields,"/job_ranks/new")
@@ -627,13 +701,13 @@ def job_ranks_new(request: Request):
 @app.post("/job_ranks/new")
 def job_ranks_new_submit(request: Request, db: OrmSession = Depends(get_db),
                          rank_code: str = Form(...), name: str = Form(...)):
-    require_login(request)
+    require_login(request); require_master(request)
     db.add(JobRank(rank_code=rank_code.strip().upper(), name=name.strip())); db.commit()
     return RedirectResponse(url="/job_ranks", status_code=HTTP_302_FOUND)
 
 @app.get("/job_ranks/edit/{rid}", response_class=HTMLResponse)
 def job_ranks_edit(request: Request, rid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     r = db.get(JobRank, rid); assert r
     fields=[{"name":"rank_code","label":"코드","type":"text","required":True,"value":r.rank_code},
             {"name":"name","label":"이름","type":"text","required":True,"value":r.name}]
@@ -642,14 +716,14 @@ def job_ranks_edit(request: Request, rid: int, db: OrmSession = Depends(get_db))
 @app.post("/job_ranks/edit/{rid}")
 def job_ranks_edit_submit(request: Request, rid: int, db: OrmSession = Depends(get_db),
                           rank_code: str = Form(...), name: str = Form(...)):
-    require_login(request)
+    require_login(request); require_master(request)
     r = db.get(JobRank, rid); assert r
     r.rank_code = rank_code.strip().upper(); r.name = name.strip(); db.commit()
     return RedirectResponse(url="/job_ranks", status_code=HTTP_302_FOUND)
 
 @app.post("/job_ranks/delete/{rid}")
 def job_ranks_delete(request: Request, rid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     r = db.get(JobRank, rid)
     if r: db.delete(r); db.commit()
     return RedirectResponse(url="/job_ranks", status_code=HTTP_302_FOUND)
@@ -657,7 +731,7 @@ def job_ranks_delete(request: Request, rid: int, db: OrmSession = Depends(get_db
 
 @app.get("/roles", response_class=HTMLResponse)
 def roles_list(request: Request, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     rows = [[r.role_id, r.role_code, r.name, r.created_at]
             for r in db.query(Role).order_by(Role.role_id.asc()).all()]
     return render_list(request, "권한", ["ID","코드","이름","생성"], rows, {
@@ -666,7 +740,7 @@ def roles_list(request: Request, db: OrmSession = Depends(get_db)):
 
 @app.get("/roles/new", response_class=HTMLResponse)
 def roles_new(request: Request):
-    require_login(request)
+    require_login(request); require_master(request)
     fields=[{"name":"role_code","label":"코드","type":"text","required":True},
             {"name":"name","label":"이름","type":"text","required":True}]
     return render_form(request,"권한 추가",fields,"/roles/new")
@@ -674,13 +748,13 @@ def roles_new(request: Request):
 @app.post("/roles/new")
 def roles_new_submit(request: Request, db: OrmSession = Depends(get_db),
                      role_code: str = Form(...), name: str = Form(...)):
-    require_login(request)
+    require_login(request); require_master(request)
     db.add(Role(role_code=role_code.strip().upper(), name=name.strip())); db.commit()
     return RedirectResponse(url="/roles", status_code=HTTP_302_FOUND)
 
 @app.get("/roles/edit/{rid}", response_class=HTMLResponse)
 def roles_edit(request: Request, rid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     r = db.get(Role, rid); assert r
     fields=[{"name":"role_code","label":"코드","type":"text","required":True,"value":r.role_code},
             {"name":"name","label":"이름","type":"text","required":True,"value":r.name}]
@@ -689,14 +763,14 @@ def roles_edit(request: Request, rid: int, db: OrmSession = Depends(get_db)):
 @app.post("/roles/edit/{rid}")
 def roles_edit_submit(request: Request, rid: int, db: OrmSession = Depends(get_db),
                       role_code: str = Form(...), name: str = Form(...)):
-    require_login(request)
+    require_login(request); require_master(request)
     r = db.get(Role, rid); assert r
     r.role_code = role_code.strip().upper(); r.name = name.strip(); db.commit()
     return RedirectResponse(url="/roles", status_code=HTTP_302_FOUND)
 
 @app.post("/roles/delete/{rid}")
 def roles_delete(request: Request, rid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     r = db.get(Role, rid)
     if r: db.delete(r); db.commit()
     return RedirectResponse(url="/roles", status_code=HTTP_302_FOUND)
@@ -704,7 +778,7 @@ def roles_delete(request: Request, rid: int, db: OrmSession = Depends(get_db)):
 
 @app.get("/employees", response_class=HTMLResponse)
 def employees_list(request: Request, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     rows=[]
     for e in db.query(Employee).order_by(Employee.emp_id.asc()).all():
         dept = e.dept.name if e.dept else ""
@@ -717,7 +791,7 @@ def employees_list(request: Request, db: OrmSession = Depends(get_db)):
 
 @app.get("/employees/new", response_class=HTMLResponse)
 def employees_new(request: Request, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     fields = [
         {"name":"name","label":"이름","type":"text","required":True},
         {"name":"dept_id","label":"부서","type":"select","options":[(None,"")] + options_departments(db),"nullable":True},
@@ -733,7 +807,7 @@ def employees_new_submit(
     name: str = Form(...), dept_id: Optional[int] = Form(None), rank_id: Optional[int] = Form(None),
     status: str = Form("active"), roles: Optional[List[int]] = Form(None)
 ):
-    require_login(request)
+    require_login(request); require_master(request)
     e = Employee(name=name.strip(), dept_id=dept_id or None, rank_id=rank_id or None, status=status)
     db.add(e); db.commit(); db.refresh(e)
     if roles:
@@ -745,7 +819,7 @@ def employees_new_submit(
 
 @app.get("/employees/edit/{eid}", response_class=HTMLResponse)
 def employees_edit(request: Request, eid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     e = db.get(Employee, eid); assert e
     current_roles = [er.role_id for er in e.emp_roles]
     fields = [
@@ -763,7 +837,7 @@ def employees_edit_submit(
     name: str = Form(...), dept_id: Optional[int] = Form(None), rank_id: Optional[int] = Form(None),
     status: str = Form("active"), roles: Optional[List[int]] = Form(None)
 ):
-    require_login(request)
+    require_login(request); require_master(request)
     e = db.get(Employee, eid); assert e
     e.name=name.strip(); e.dept_id=dept_id or None; e.rank_id=rank_id or None; e.status=status
     db.query(EmployeeRole).filter(EmployeeRole.emp_id==eid).delete()
@@ -776,22 +850,27 @@ def employees_edit_submit(
 
 @app.post("/employees/delete/{eid}")
 def employees_delete(request: Request, eid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     e = db.get(Employee, eid)
     if e: db.delete(e); db.commit()
     return RedirectResponse(url="/employees", status_code=HTTP_302_FOUND)
 
 
 # ------------------------------------------------------------------------------
-# 협력사 / 현장 / 상세현장 (기본 정렬: ID ASC)
+#// 협력사 / 현장 / 상세현장 (기본 정렬: ID ASC)
 # ------------------------------------------------------------------------------
 @app.get("/vendors", response_class=HTMLResponse)
 def vendors_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    rows=[[v.vendor_id,v.name,v.ceo_name or "",v.phone or "",v.email or "",v.created_at]
-          for v in db.query(Vendor).order_by(Vendor.vendor_id.asc()).all()]
-    return render_list(request,"협력사",["ID","업체명","대표","연락처","이메일","생성"],rows,{
-        "new":"/vendors/new","edit":"/vendors/edit/{id}","delete":"/vendors/delete/{id}"
+    rows = [[v.vendor_id, v.name, v.ceo_name or "", v.phone or "", v.email or "", v.created_at]
+            for v in db.query(Vendor).order_by(Vendor.vendor_id.asc()).all()]
+
+    can_master = "MASTER" in current_roles(request)
+    return render_list(request, "협력사",
+        ["ID","업체명","대표","연락처","이메일","생성"], rows, {
+        "new":    "/vendors/new"           if can_master else None,
+        "edit":   "/vendors/edit/{id}"     if can_master else None,
+        "delete": "/vendors/delete/{id}"   if can_master else None,
     })
 
 @app.get("/vendors/new", response_class=HTMLResponse)
@@ -809,13 +888,13 @@ def vendors_new(request: Request):
 def vendors_new_submit(request: Request, db: OrmSession = Depends(get_db),
                        name: str = Form(...), ceo_name: Optional[str] = Form(None), phone: Optional[str] = Form(None),
                        email: Optional[str] = Form(None), address: Optional[str] = Form(None), note: Optional[str] = Form(None)):
-    require_login(request)
+    require_login(request); require_master(request)
     db.add(Vendor(name=name.strip(),ceo_name=ceo_name,phone=phone,email=email,address=address,note=note)); db.commit()
     return RedirectResponse(url="/vendors", status_code=HTTP_302_FOUND)
 
 @app.get("/vendors/edit/{vid}", response_class=HTMLResponse)
 def vendors_edit(request: Request, vid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     v = db.get(Vendor, vid); assert v
     fields=[{"name":"name","label":"업체명","type":"text","required":True,"value":v.name},
             {"name":"ceo_name","label":"대표","type":"text","value":v.ceo_name or ""},
@@ -835,7 +914,7 @@ def vendors_edit_submit(
     address: Optional[str] = Form(None),
     note: Optional[str] = Form(None)
 ):
-    require_login(request)
+    require_login(request); require_master(request)
     v = db.get(Vendor, vid); assert v
     v.name = name.strip()
     v.ceo_name = ceo_name
@@ -846,10 +925,9 @@ def vendors_edit_submit(
     db.commit()
     return RedirectResponse(url="/vendors", status_code=HTTP_302_FOUND)
 
-
 @app.post("/vendors/delete/{vid}")
 def vendors_delete(request: Request, vid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     v = db.get(Vendor, vid)
     if v: db.delete(v); db.commit()
     return RedirectResponse(url="/vendors", status_code=HTTP_302_FOUND)
@@ -858,15 +936,22 @@ def vendors_delete(request: Request, vid: int, db: OrmSession = Depends(get_db))
 @app.get("/sites", response_class=HTMLResponse)
 def sites_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    rows=[[s.site_id,s.name,s.camera_count,s.nrs_count,s.created_at]
-          for s in db.query(Site).order_by(Site.site_id.asc()).all()]
-    return render_list(request,"현장",["ID","현장명","카메라수","NRS수","생성"],rows,{
-        "new":"/sites/new","edit":"/sites/edit/{id}","delete":"/sites/delete/{id}","child":"/site_locations?site_id={id}"
+    rows = [[s.site_id, s.name, s.camera_count, s.nrs_count, s.created_at]
+            for s in db.query(Site).order_by(Site.site_id.asc()).all()]
+
+    can_master = "MASTER" in current_roles(request)
+    return render_list(request, "현장",
+        ["ID","현장명","카메라수","NRS수","생성"], rows, {
+        "new":    "/sites/new"               if can_master else None,
+        "edit":   "/sites/edit/{id}"         if can_master else None,
+        "delete": "/sites/delete/{id}"       if can_master else None,
+        "child":  "/site_locations?site_id={id}",   # ← 자세히(항상)
     })
+
 
 @app.get("/sites/new", response_class=HTMLResponse)
 def sites_new(request: Request):
-    require_login(request)
+    require_login(request); require_master(request)
     fields=[{"name":"name","label":"현장명","type":"text","required":True},
             {"name":"camera_count","label":"카메라수","type":"number","value":0},
             {"name":"nrs_count","label":"NRS수","type":"number","value":0},
@@ -876,13 +961,13 @@ def sites_new(request: Request):
 @app.post("/sites/new")
 def sites_new_submit(request: Request, db: OrmSession = Depends(get_db),
                      name: str = Form(...), camera_count: int = Form(0), nrs_count: int = Form(0), note: Optional[str] = Form(None)):
-    require_login(request)
+    require_login(request); require_master(request)
     db.add(Site(name=name.strip(),camera_count=camera_count,nrs_count=nrs_count,note=note)); db.commit()
     return RedirectResponse(url="/sites", status_code=HTTP_302_FOUND)
 
 @app.get("/sites/edit/{sid}", response_class=HTMLResponse)
 def sites_edit(request: Request, sid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     s = db.get(Site, sid); assert s
     fields=[{"name":"name","label":"현장명","type":"text","required":True,"value":s.name},
             {"name":"camera_count","label":"카메라수","type":"number","value":s.camera_count},
@@ -893,7 +978,7 @@ def sites_edit(request: Request, sid: int, db: OrmSession = Depends(get_db)):
 @app.post("/sites/edit/{sid}")
 def sites_edit_submit(request: Request, sid: int, db: OrmSession = Depends(get_db),
                       name: str = Form(...), camera_count: int = Form(0), nrs_count: int = Form(0), note: Optional[str] = Form(None)):
-    require_login(request)
+    require_login(request); require_master(request)
     s = db.get(Site, sid); assert s
     s.name=name.strip(); s.camera_count=camera_count; s.nrs_count=nrs_count; s.note=note
     db.commit()
@@ -901,7 +986,7 @@ def sites_edit_submit(request: Request, sid: int, db: OrmSession = Depends(get_d
 
 @app.post("/sites/delete/{sid}")
 def sites_delete(request: Request, sid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     s = db.get(Site, sid)
     if s: db.delete(s); db.commit()
     return RedirectResponse(url="/sites", status_code=HTTP_302_FOUND)
@@ -912,15 +997,21 @@ def site_locations_list(request: Request, db: OrmSession = Depends(get_db), site
     require_login(request)
     q = db.query(SiteLocation).join(Site)
     if site_id: q = q.filter(SiteLocation.site_id == site_id)
-    rows=[[l.location_id, f"[{l.site.name}] {l.name}", l.address or "", l.manager_name or "", l.manager_phone or "", l.created_at]
-          for l in q.order_by(SiteLocation.location_id.asc()).all()]
-    return render_list(request,"상세현장",["ID","이름","주소","담당자","연락처","생성"],rows,{
-        "new":"/site_locations/new","edit":"/site_locations/edit/{id}","delete":"/site_locations/delete/{id}"
+    rows = [[l.location_id, f"[{l.site.name}] {l.name}", l.address or "", l.manager_name or "", l.manager_phone or "", l.created_at]
+            for l in q.order_by(SiteLocation.location_id.asc()).all()]
+
+    can_master = "MASTER" in current_roles(request)
+    return render_list(request, "상세현장",
+        ["ID","이름","주소","담당자","연락처","생성"], rows, {
+        "new":    "/site_locations/new"           if can_master else None,
+        "edit":   "/site_locations/edit/{id}"     if can_master else None,
+        "delete": "/site_locations/delete/{id}"   if can_master else None,
     })
+
 
 @app.get("/site_locations/new", response_class=HTMLResponse)
 def site_locations_new(request: Request, db: OrmSession = Depends(get_db), site_id: Optional[int] = None):
-    require_login(request)
+    require_login(request); require_master(request)
     fields=[{"name":"site_id","label":"현장","type":"select","options":[(None,"")] + options_sites(db),"value":site_id or ""},
             {"name":"name","label":"이름","type":"text","required":True},
             {"name":"address","label":"주소","type":"text"},
@@ -934,13 +1025,13 @@ def site_locations_new_submit(request: Request, db: OrmSession = Depends(get_db)
                               site_id: int = Form(...), name: str = Form(...),
                               address: Optional[str] = Form(None), manager_name: Optional[str] = Form(None),
                               manager_phone: Optional[str] = Form(None), note: Optional[str] = Form(None)):
-    require_login(request)
+    require_login(request); require_master(request)
     db.add(SiteLocation(site_id=site_id, name=name.strip(), address=address, manager_name=manager_name, manager_phone=manager_phone, note=note)); db.commit()
     return RedirectResponse(url="/site_locations", status_code=HTTP_302_FOUND)
 
 @app.get("/site_locations/edit/{lid}", response_class=HTMLResponse)
 def site_locations_edit(request: Request, lid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     l = db.get(SiteLocation, lid); assert l
     fields=[{"name":"site_id","label":"현장","type":"select","options":[(None,"")] + options_sites(db),"value":l.site_id},
             {"name":"name","label":"이름","type":"text","required":True,"value":l.name},
@@ -955,7 +1046,7 @@ def site_locations_edit_submit(request: Request, lid: int, db: OrmSession = Depe
                                site_id: int = Form(...), name: str = Form(...),
                                address: Optional[str] = Form(None), manager_name: Optional[str] = Form(None),
                                manager_phone: Optional[str] = Form(None), note: Optional[str] = Form(None)):
-    require_login(request)
+    require_login(request); require_master(request)
     l = db.get(SiteLocation, lid); assert l
     l.site_id=site_id; l.name=name.strip(); l.address=address; l.manager_name=manager_name; l.manager_phone=manager_phone; l.note=note
     db.commit()
@@ -963,15 +1054,15 @@ def site_locations_edit_submit(request: Request, lid: int, db: OrmSession = Depe
 
 @app.post("/site_locations/delete/{lid}")
 def site_locations_delete(request: Request, lid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     l = db.get(SiteLocation, lid)
     if l: db.delete(l); db.commit()
     return RedirectResponse(url="/site_locations", status_code=HTTP_302_FOUND)
 
 
 # ------------------------------------------------------------------------------
-# CS: 요청 / 일정 (기본 정렬: ID DESC)
-# ------------------------------------------------------------------------------
+#// CS: 요청 / 일정 (일정은 TECH만 등록/수정/삭제, 요청은 모두 가능)
+#// ------------------------------------------------------------------------------
 @app.get("/cs_requests", response_class=HTMLResponse)
 def cs_requests_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
@@ -1048,18 +1139,24 @@ def cs_requests_delete(request: Request, rid: int, db: OrmSession = Depends(get_
 @app.get("/cs_schedules", response_class=HTMLResponse)
 def cs_schedules_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
+    can_edit = has_role(request, "TECH", "MASTER")  # ★ 둘 다 허용
+
     q = db.query(CSSchedule).outerjoin(Site)
-    rows=[]
+    rows = []
     for s in q.order_by(CSSchedule.schedule_id.desc()).all():
         assignees = ", ".join([a.employee.name for a in s.sch_assignees])
         rows.append([s.schedule_id, (s.site.name if s.site else ""), s.start_date, s.end_date or "", s.status, assignees])
-    return render_list(request,"CS 일정",["ID","현장","시작","종료","상태","담당자"],rows,{
-        "new":"/cs_schedules/new","edit":"/cs_schedules/edit/{id}","delete":"/cs_schedules/delete/{id}"
+
+    return render_list(request, "CS 일정", ["ID","현장","시작","종료","상태","담당자"], rows, {
+        "new":    "/cs_schedules/new"         if can_edit else None,
+        "edit":   "/cs_schedules/edit/{id}"   if can_edit else None,
+        "delete": "/cs_schedules/delete/{id}" if can_edit else None
     })
+
 
 @app.get("/cs_schedules/new", response_class=HTMLResponse)
 def cs_schedules_new(request: Request, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_tech(request)
     fields=[{"name":"request_id","label":"요청ID","type":"select","search_inline": True,
              "options":[(None,"")] + [(r.request_id, f"{r.request_id}: {r.requester_name}") for r in db.query(CSRequest).order_by(CSRequest.request_id.desc()).all()],"nullable":True},
             {"name":"site_id","label":"현장","type":"select","search_inline": True,"options":[(None,"")] + options_sites(db),"nullable":True},
@@ -1091,13 +1188,10 @@ def cs_schedules_new_submit(
     locations: Optional[List[int]] = Form(None),
     assignees: Optional[List[int]] = Form(None),
 ):
-    require_login(request)
+    require_login(request); require_tech(request)
 
-    # 빈 문자열을 None으로 변환
     request_id_i = _to_int_or_none(request_id)
     site_id_i    = _to_int_or_none(site_id)
-
-    # color를 빈값을 받으면 기본색
     color_val = (color or "").strip() or default_color(status)
 
     s = CSSchedule(
@@ -1114,9 +1208,8 @@ def cs_schedules_new_submit(
     )
     db.add(s); db.commit(); db.refresh(s)
 
-    # 다중 선택들 처리
     if locations:
-        if isinstance(locations, str):  # 단일값 케이스 방어
+        if isinstance(locations, str):
             locations = [locations]
         for lid in locations:
             db.add(CSScheduleLocation(schedule_id=s.schedule_id, location_id=int(lid)))
@@ -1133,7 +1226,7 @@ def cs_schedules_new_submit(
 
 @app.get("/cs_schedules/edit/{sid}", response_class=HTMLResponse)
 def cs_schedules_edit(request: Request, sid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_tech(request)
     s = db.get(CSSchedule, sid); assert s
     cur_locs = [sl.location_id for sl in s.sch_locations]
     cur_emps = [sa.emp_id for sa in s.sch_assignees]
@@ -1167,7 +1260,7 @@ def cs_schedules_edit_submit(
     locations: Optional[List[int]] = Form(None),
     assignees: Optional[List[int]] = Form(None),
 ):
-    require_login(request)
+    require_login(request); require_tech(request)  # ★ TECH 강제
 
     request_id_i = _to_int_or_none(request_id)
     site_id_i    = _to_int_or_none(site_id)
@@ -1184,7 +1277,6 @@ def cs_schedules_edit_submit(
     s.note   = note
     s.color  = (color or "").strip() or default_color(status)
 
-    # 다대다 갱신
     db.query(CSScheduleLocation).filter(CSScheduleLocation.schedule_id == sid).delete()
     if locations:
         if isinstance(locations, str):
@@ -1202,30 +1294,45 @@ def cs_schedules_edit_submit(
     db.commit()
     return RedirectResponse(url="/cs_schedules", status_code=HTTP_302_FOUND)
 
-
 @app.post("/cs_schedules/delete/{sid}")
 def cs_schedules_delete(request: Request, sid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_tech(request)  # ★ TECH 강제
     s = db.get(CSSchedule, sid)
     if s: db.delete(s); db.commit()
     return RedirectResponse(url="/cs_schedules", status_code=HTTP_302_FOUND)
 
 
 # ------------------------------------------------------------------------------
-# 제품: SW / 서비스 (기본 정렬: ID ASC)
+#// 제품: SW / 서비스 (기본 정렬: ID ASC)
 # ------------------------------------------------------------------------------
 @app.get("/sw_products", response_class=HTMLResponse)
 def sw_products_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    rows=[[p.sw_id,p.sw_code or "",p.sw_name,p.unit or "",p.price_wons,p.status,p.created_at]
-          for p in db.query(SWProduct).order_by(SWProduct.sw_id.asc()).all()]
-    return render_list(request,"SW 제품",["ID","코드","제품명","단위","가격(원)","상태","생성"],rows,{
-        "new":"/sw_products/new","edit":"/sw_products/edit/{id}","delete":"/sw_products/delete/{id}","child":"/sw_services?sw_id={id}"
+    rows = [[p.sw_id, p.sw_code or "", p.sw_name, p.unit or "", p.price_wons, p.status, p.created_at]
+            for p in db.query(SWProduct).order_by(SWProduct.sw_id.asc()).all()]
+
+    headers = [
+        {"label":"ID","bold": True},
+        {"label":"코드","bold": True},
+        {"label":"제품명","bold": True},
+        {"label":"단위","bold": True},
+        {"label":"가격(원)","align":"left","bold": True,"format":"money","td_class":"td-right"},
+        {"label":"상태","bold": True},
+        {"label":"생성","bold": True},
+    ]
+
+    can_master = "MASTER" in current_roles(request)
+    return render_list(request, "SW 제품", headers, rows, {
+        "new":    "/sw_products/new"           if can_master else None,
+        "edit":   "/sw_products/edit/{id}"     if can_master else None,
+        "delete": "/sw_products/delete/{id}"   if can_master else None,
+        "child":  "/sw_services?sw_id={id}",   # ← 자세히(항상)
     })
+
 
 @app.get("/sw_products/new", response_class=HTMLResponse)
 def sw_products_new(request: Request):
-    require_login(request)
+    require_login(request); require_master(request)
     fields=[{"name":"sw_code","label":"제품코드","type":"text"},
             {"name":"sw_name","label":"제품명","type":"text","required":True},
             {"name":"unit","label":"단위","type":"text"},
@@ -1240,7 +1347,7 @@ def sw_products_new_submit(request: Request, db: OrmSession = Depends(get_db),
                            sw_name: str = Form(...), unit: Optional[str] = Form(None),
                            sw_func: Optional[str] = Form(None), price_wons: int = Form(0),
                            status: str = Form("active")):
-    require_login(request)
+    require_login(request); require_master(request)
     db.add(SWProduct(sw_code=(sw_code.strip() if sw_code else None),
                      sw_name=sw_name.strip(), unit=(unit or None), sw_func=sw_func,
                      price_wons=price_wons, status=status)); db.commit()
@@ -1248,7 +1355,7 @@ def sw_products_new_submit(request: Request, db: OrmSession = Depends(get_db),
 
 @app.get("/sw_products/edit/{pid}", response_class=HTMLResponse)
 def sw_products_edit(request: Request, pid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     p = db.get(SWProduct, pid); assert p
     fields=[{"name":"sw_code","label":"제품코드","type":"text","value":p.sw_code or ""},
             {"name":"sw_name","label":"제품명","type":"text","required":True,"value":p.sw_name},
@@ -1264,7 +1371,7 @@ def sw_products_edit_submit(request: Request, pid: int, db: OrmSession = Depends
                             sw_name: str = Form(...), unit: Optional[str] = Form(None),
                             sw_func: Optional[str] = Form(None), price_wons: int = Form(0),
                             status: str = Form("active")):
-    require_login(request)
+    require_login(request); require_master(request)
     p = db.get(SWProduct, pid); assert p
     p.sw_code=(sw_code.strip() if sw_code else None); p.sw_name=sw_name.strip()
     p.unit=(unit or None); p.sw_func=sw_func; p.price_wons=price_wons; p.status=status
@@ -1273,7 +1380,7 @@ def sw_products_edit_submit(request: Request, pid: int, db: OrmSession = Depends
 
 @app.post("/sw_products/delete/{pid}")
 def sw_products_delete(request: Request, pid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     p = db.get(SWProduct, pid)
     if p: db.delete(p); db.commit()
     return RedirectResponse(url="/sw_products", status_code=HTTP_302_FOUND)
@@ -1284,24 +1391,30 @@ def sw_services_list(request: Request, db: OrmSession = Depends(get_db), sw_id: 
     require_login(request)
     q = db.query(SWService).join(SWProduct)
     if sw_id: q = q.filter(SWService.sw_id == sw_id)
-    rows=[[s.sv_id, s.product.sw_name, s.sv_code, s.sv_name, s.sv_type, s.price_wons, s.status]
-          for s in q.order_by(SWService.sv_id.asc()).all()]
+    rows = [[s.sv_id, s.product.sw_name, s.sv_code, s.sv_name, s.sv_type, s.price_wons, s.status]
+            for s in q.order_by(SWService.sv_id.asc()).all()]
+
     headers = [
-        "ID",
-        {"label": "제품", "align": "center", "bold": True},
-        {"label": "서비스코드", "align": "center"},
-        {"label": "서비스명", "align": "center", "bold":True},
-        {"label": "유형", "align": "center"},
-        {"label": "가격(원)",   "align": "right",  "bold": True, "format": "money"},
-        {"label": "상태", "align": "center"},
+        {"label":"ID","bold": True},
+        {"label":"제품","bold": True},
+        {"label":"서비스코드","bold": True},
+        {"label":"서비스명","bold": True},
+        {"label":"유형","bold": True},
+        {"label":"가격(원)","align":"left","bold": True,"format":"money","td_class":"td-right"},
+        {"label":"상태","bold": True},
     ]
-    return render_list(request,"서비스",["ID","제품","서비스코드","서비스명","유형","가격(원)","상태"],rows,{
-        "new":"/sw_services/new","edit":"/sw_services/edit/{id}","delete":"/sw_services/delete/{id}"
+
+    can_master = "MASTER" in current_roles(request)
+    return render_list(request, "서비스", headers, rows, {
+        "new":    "/sw_services/new"           if can_master else None,
+        "edit":   "/sw_services/edit/{id}"     if can_master else None,
+        "delete": "/sw_services/delete/{id}"   if can_master else None,
     })
+
 
 @app.get("/sw_services/new", response_class=HTMLResponse)
 def sw_services_new(request: Request, db: OrmSession = Depends(get_db), sw_id: Optional[int] = None):
-    require_login(request)
+    require_login(request); require_master(request)
     fields=[{"name":"sw_id","label":"제품","type":"select","options":options_sw_products(db),"value":sw_id or ""},
             {"name":"sv_code","label":"서비스코드","type":"text","required":True},
             {"name":"sv_name","label":"서비스명","type":"text","required":True},
@@ -1315,14 +1428,14 @@ def sw_services_new_submit(request: Request, db: OrmSession = Depends(get_db),
                            sw_id: int = Form(...), sv_code: str = Form(...),
                            sv_name: str = Form(...), sv_type: str = Form("A"),
                            price_wons: int = Form(0), status: str = Form("active")):
-    require_login(request)
+    require_login(request); require_master(request)
     db.add(SWService(sw_id=sw_id, sv_code=sv_code.strip(), sv_name=sv_name.strip(),
                      sv_type=sv_type, price_wons=price_wons, status=status)); db.commit()
     return RedirectResponse(url="/sw_services", status_code=HTTP_302_FOUND)
 
 @app.get("/sw_services/edit/{sid}", response_class=HTMLResponse)
 def sw_services_edit(request: Request, sid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     s = db.get(SWService, sid); assert s
     fields=[{"name":"sw_id","label":"제품","type":"select","options":options_sw_products(db),"value":s.sw_id},
             {"name":"sv_code","label":"서비스코드","type":"text","required":True,"value":s.sv_code},
@@ -1337,7 +1450,7 @@ def sw_services_edit_submit(request: Request, sid: int, db: OrmSession = Depends
                             sw_id: int = Form(...), sv_code: str = Form(...),
                             sv_name: str = Form(...), sv_type: str = Form("A"),
                             price_wons: int = Form(0), status: str = Form("active")):
-    require_login(request)
+    require_login(request); require_master(request)
     s = db.get(SWService, sid); assert s
     s.sw_id=sw_id; s.sv_code=sv_code.strip(); s.sv_name=sv_name.strip()
     s.sv_type=sv_type; s.price_wons=price_wons; s.status=status
@@ -1346,14 +1459,14 @@ def sw_services_edit_submit(request: Request, sid: int, db: OrmSession = Depends
 
 @app.post("/sw_services/delete/{sid}")
 def sw_services_delete(request: Request, sid: int, db: OrmSession = Depends(get_db)):
-    require_login(request)
+    require_login(request); require_master(request)
     s = db.get(SWService, sid)
     if s: db.delete(s); db.commit()
     return RedirectResponse(url="/sw_services", status_code=HTTP_302_FOUND)
 
 
 # ------------------------------------------------------------------------------
-# 헬스체크
+#// 헬스체크
 # ------------------------------------------------------------------------------
 @app.get("/healthz")
 def healthz(db: OrmSession = Depends(get_db)):
@@ -1365,7 +1478,7 @@ def healthz(db: OrmSession = Depends(get_db)):
 
 
 # ------------------------------------------------------------------------------
-# 실행
+#// 실행
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
