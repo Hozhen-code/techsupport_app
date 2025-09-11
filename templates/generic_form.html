@@ -26,6 +26,14 @@
 
 <div class="card">
   <div class="card-body">
+    {% if request.session.get('user') %}
+  <div class="mb-2" style="text-align:right;">
+    <a class="btn btn-light btn-small" href="/account/password">비밀번호 변경</a>
+    <a class="btn btn-outline btn-small" href="/logout">로그아웃</a>
+  </div>
+  {% endif %}
+
+  <form method="{{ method|default('post') }}" action="{{ action }}" enctype="application/x-www-form-urlencoded">
 
     <form method="{{ method|default('post') }}" action="{{ action }}" enctype="application/x-www-form-urlencoded">
 

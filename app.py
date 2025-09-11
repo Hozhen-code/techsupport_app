@@ -1,24 +1,21 @@
-# app.py — NAIZ 전산프로그램 (권한/정렬/포맷 반영판)
+# app.py — NAIZ 전산프로그램
 import os
 import json
 from datetime import date
 from typing import Optional, List, Dict, Any
-# 상단 import 구역에 추가
 import hashlib, hmac, secrets, string
 from passlib.hash import bcrypt, argon2
-
+from urllib.parse import quote
 from fastapi import FastAPI, Request, Form, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_302_FOUND
-
 from sqlalchemy import (
     create_engine, event, Column, Integer, String, Text, DateTime, ForeignKey,
     UniqueConstraint, or_, select, func
     )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session as OrmSession
-
 from fastapi.templating import Jinja2Templates
 
 
@@ -456,6 +453,40 @@ def account_password_submit(
 
     request.session.clear()
     return RedirectResponse(url="/login", status_code=HTTP_302_FOUND)
+
+@app.post("/account/password")
+def account_password_submit(
+    request: Request, db: OrmSession = Depends(get_db),
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...)
+):
+    require_login(request)
+
+    # 입력 공백 방지
+    current_password = (current_password or "").strip()
+    new_password     = (new_password or "").strip()
+    confirm_password = (confirm_password or "").strip()
+
+    def err(msg): return RedirectResponse(f"/account/password?err={quote(msg)}", status_code=303)
+
+    if new_password != confirm_password: return err("새 비밀번호 확인이 일치하지 않습니다.")
+    if len(new_password) < 8:           return err("새 비밀번호는 8자 이상이어야 합니다.")
+
+    emp_id = request.session["user"]["emp_id"]
+    auth = db.execute(select(EmployeeAuth).where(EmployeeAuth.emp_id == emp_id)).scalar_one_or_none()
+    if not auth: raise HTTPException(status_code=404, detail="계정 정보를 찾을 수 없습니다.")
+
+    if not verify_and_upgrade_password(db, auth, current_password):
+        return err("현재 비밀번호가 올바르지 않습니다.")
+
+    auth.pw_hash = hash_password(new_password)
+    auth.pw_salt = None
+    db.commit()
+
+    request.session.clear()
+    return RedirectResponse("/login?ok=PW_UPDATED", status_code=303)
+
 
 # ------------------------------------------------------------------------------
 #// 유틸: 셀렉트 옵션
