@@ -862,12 +862,24 @@ def employees_delete(request: Request, eid: int, db: OrmSession = Depends(get_db
 @app.get("/vendors", response_class=HTMLResponse)
 def vendors_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    rows = [[v.vendor_id, v.name, v.ceo_name or "", v.phone or "", v.email or "", v.created_at]
-            for v in db.query(Vendor).order_by(Vendor.vendor_id.asc()).all()]
+    # 생성 컬럼 제거
+    rows = [
+        [v.vendor_id, v.name, v.ceo_name or "", v.phone or "", v.email or ""]
+        for v in db.query(Vendor).order_by(Vendor.vendor_id.asc()).all()
+    ]
+
+    headers = [
+        {"label":"ID", "bold": True},
+        {"label":"업체명", "bold": True},
+        {"label":"대표", "bold": True},
+        {"label":"연락처", "bold": True},
+        {"label":"이메일", "bold": True}
+        # '상태', '생성' 제거
+    ]
 
     can_master = "MASTER" in current_roles(request)
     return render_list(request, "협력사",
-        ["ID","업체명","대표","연락처","이메일","생성"], rows, {
+        ["ID","업체명","대표","연락처","이메일"], rows, {
         "new":    "/vendors/new"           if can_master else None,
         "edit":   "/vendors/edit/{id}"     if can_master else None,
         "delete": "/vendors/delete/{id}"   if can_master else None,
@@ -936,12 +948,22 @@ def vendors_delete(request: Request, vid: int, db: OrmSession = Depends(get_db))
 @app.get("/sites", response_class=HTMLResponse)
 def sites_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    rows = [[s.site_id, s.name, s.camera_count, s.nrs_count, s.created_at]
-            for s in db.query(Site).order_by(Site.site_id.asc()).all()]
+    # 생성 컬럼 제거
+    rows = [
+        [s.site_id, s.name, s.camera_count, s.nrs_count]
+        for s in db.query(Site).order_by(Site.site_id.asc()).all()
+    ]
+
+    headers = [
+        {"label":"ID", "bold": True},
+        {"label":"현장명", "bold": True},
+        {"label":"카메라수", "bold": True},
+        {"label":"NRS수", "bold": True}
+    ]
 
     can_master = "MASTER" in current_roles(request)
     return render_list(request, "현장",
-        ["ID","현장명","카메라수","NRS수","생성"], rows, {
+        ["ID","현장명","카메라수","NRS수",], rows, {
         "new":    "/sites/new"               if can_master else None,
         "edit":   "/sites/edit/{id}"         if can_master else None,
         "delete": "/sites/delete/{id}"       if can_master else None,
@@ -997,12 +1019,22 @@ def site_locations_list(request: Request, db: OrmSession = Depends(get_db), site
     require_login(request)
     q = db.query(SiteLocation).join(Site)
     if site_id: q = q.filter(SiteLocation.site_id == site_id)
-    rows = [[l.location_id, f"[{l.site.name}] {l.name}", l.address or "", l.manager_name or "", l.manager_phone or "", l.created_at]
-            for l in q.order_by(SiteLocation.location_id.asc()).all()]
-
+    # 생성 컬럼 제거
+    rows = [
+        [l.location_id, f"[{l.site.name}] {l.name}", l.address or "", l.manager_name or "", l.manager_phone or ""]
+        for l in q.order_by(SiteLocation.location_id.asc()).all()
+    ]
+    headers = [
+        {"label":"ID", "bold": True},
+        {"label":"이름", "bold": True},
+        {"label":"주소", "bold": True},
+        {"label":"담당자", "bold": True},
+        {"label":"연락처", "bold": True}
+        # '상태', '생성' 제거
+    ]
     can_master = "MASTER" in current_roles(request)
     return render_list(request, "상세현장",
-        ["ID","이름","주소","담당자","연락처","생성"], rows, {
+        ["ID","이름","주소","담당자","연락처"], rows, {
         "new":    "/site_locations/new"           if can_master else None,
         "edit":   "/site_locations/edit/{id}"     if can_master else None,
         "delete": "/site_locations/delete/{id}"   if can_master else None,
@@ -1308,17 +1340,18 @@ def cs_schedules_delete(request: Request, sid: int, db: OrmSession = Depends(get
 @app.get("/sw_products", response_class=HTMLResponse)
 def sw_products_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
-    rows = [[p.sw_id, p.sw_code or "", p.sw_name, p.unit or "", p.price_wons, p.status, p.created_at]
-            for p in db.query(SWProduct).order_by(SWProduct.sw_id.asc()).all()]
-
+    # 상태/생성 컬럼 제거
+    rows = [
+        [p.sw_id, p.sw_code or "", p.sw_name, p.unit or "", p.price_wons]
+        for p in db.query(SWProduct).order_by(SWProduct.sw_id.asc()).all()
+    ]
     headers = [
-        {"label":"ID","bold": True},
-        {"label":"코드","bold": True},
-        {"label":"제품명","bold": True},
-        {"label":"단위","bold": True},
-        {"label":"가격(원)","align":"left","bold": True,"format":"money","td_class":"td-right"},
-        {"label":"상태","bold": True},
-        {"label":"생성","bold": True},
+        {"label":"ID", "bold": True},
+        {"label":"코드", "bold": True},
+        {"label":"제품명", "bold": True},
+        {"label":"단위", "bold": True},
+        {"label":"가격(원)", "align":"left", "bold": True, "format":"money", "td_class":"td-right"},
+        # '상태', '생성' 제거
     ]
 
     can_master = "MASTER" in current_roles(request)
@@ -1391,17 +1424,18 @@ def sw_services_list(request: Request, db: OrmSession = Depends(get_db), sw_id: 
     require_login(request)
     q = db.query(SWService).join(SWProduct)
     if sw_id: q = q.filter(SWService.sw_id == sw_id)
-    rows = [[s.sv_id, s.product.sw_name, s.sv_code, s.sv_name, s.sv_type, s.price_wons, s.status]
-            for s in q.order_by(SWService.sv_id.asc()).all()]
-
+    # '제품', '상태' 컬럼 제거
+    rows = [
+        [s.sv_id, s.sv_code, s.sv_name, s.sv_type, s.price_wons]
+        for s in q.order_by(SWService.sv_id.asc()).all()
+    ]
     headers = [
-        {"label":"ID","bold": True},
-        {"label":"제품","bold": True},
-        {"label":"서비스코드","bold": True},
-        {"label":"서비스명","bold": True},
-        {"label":"유형","bold": True},
-        {"label":"가격(원)","align":"left","bold": True,"format":"money","td_class":"td-right"},
-        {"label":"상태","bold": True},
+        {"label":"ID", "bold": True},
+        {"label":"서비스코드", "bold": True},
+        {"label":"서비스명", "bold": True},
+        {"label":"유형", "bold": True},
+        {"label":"가격(원)", "align":"left", "bold": True, "format":"money", "td_class":"td-right"},
+        # '제품', '상태' 제거
     ]
 
     can_master = "MASTER" in current_roles(request)
