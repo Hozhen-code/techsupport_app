@@ -3,6 +3,9 @@ import os
 import json
 from datetime import date
 from typing import Optional, List, Dict, Any
+# 상단 import 구역에 추가
+import hashlib, hmac, secrets, string
+from passlib.hash import bcrypt, argon2
 
 from fastapi import FastAPI, Request, Form, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse
@@ -13,7 +16,7 @@ from starlette.status import HTTP_302_FOUND
 from sqlalchemy import (
     create_engine, event, Column, Integer, String, Text, DateTime, ForeignKey,
     UniqueConstraint, or_, select, func
-)
+    )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session as OrmSession
 
 from fastapi.templating import Jinja2Templates
@@ -326,24 +329,43 @@ def on_startup():
 # ------------------------------------------------------------------------------
 #// 인증
 # ------------------------------------------------------------------------------
-def verify_password_hash(pw: str, hash_str: str) -> bool:
+# --- password helpers ---------------------------------------------------------
+def hash_password(pw: str) -> str:
+    """새 비밀번호를 bcrypt로 해시."""
+    return bcrypt.hash(pw)
+
+def _verify_legacy(password: str, salt: str, digest_hex: str) -> bool:
+    """예전 '별도 salt + sha256' 백업 검증."""
+    if not salt or not digest_hex:
+        return False
+    h1 = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    h2 = hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
+    return hmac.compare_digest(h1, digest_hex) or hmac.compare_digest(h2, digest_hex)
+
+def verify_and_upgrade_password(db: OrmSession, auth: "EmployeeAuth", password: str) -> bool:
+    """현대 포맷(bcrypt/argon2) 우선 검증, 실패 시 레거시 검증 -> 성공하면 즉시 bcrypt로 업그레이드."""
+    hs = auth.pw_hash or ""
     try:
-        if hash_str.startswith(("$2a$", "$2b$", "$2y$")):
-            from passlib.hash import bcrypt
-            return bcrypt.verify(pw, hash_str)
-        if hash_str.startswith("$argon2"):
-            from passlib.hash import argon2
-            return argon2.verify(pw, hash_str)
+        if hs.startswith(("$2a$", "$2b$", "$2y$")) and bcrypt.verify(password, hs):
+            return True
+        if hs.startswith("$argon2") and argon2.verify(password, hs):
+            return True
     except Exception:
         pass
+    if _verify_legacy(password, auth.pw_salt or "", hs):
+        try:
+            auth.pw_hash = hash_password(password)
+            auth.pw_salt = None
+            db.commit()
+        except Exception:
+            db.rollback()
+        return True
     return False
 
-def is_logged_in(request: Request) -> bool:
-    return "user" in request.session
+def _gen_temp_password(n: int = 10) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(n))
 
-def require_login(request: Request):
-    if not is_logged_in(request):
-        raise HTTPException(status_code=401, detail="Login required")
 
 @app.exception_handler(HTTPException)
 async def http_exc_handler(request: Request, exc: HTTPException):
@@ -360,7 +382,7 @@ def login_form(request: Request):
 def login_submit(request: Request, db: OrmSession = Depends(get_db),
                  login_id: str = Form(...), password: str = Form(...)):
     auth = db.execute(select(EmployeeAuth).where(EmployeeAuth.login_id == login_id)).scalar_one_or_none()
-    if not auth or not verify_password_hash(password, auth.pw_hash):
+    if not auth or not verify_and_upgrade_password(db, auth, password):
         return templates.TemplateResponse("login.html", {"request": request, "error": "로그인 실패"})
 
     # ★ 로그인 시 역할코드들을 세션에 저장 (중복 제거 + 대문자 정규화)
@@ -394,6 +416,46 @@ def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=HTTP_302_FOUND)
 
+# 내 비밀번호 변경 폼
+@app.get("/account/password", response_class=HTMLResponse)
+def account_password_form(request: Request):
+    require_login(request)
+    fields = [
+        {"name": "current_password", "label": "현재 비밀번호",   "type": "password", "required": True},
+        {"name": "new_password",     "label": "새 비밀번호",     "type": "password", "required": True},
+        {"name": "confirm_password", "label": "새 비밀번호 확인", "type": "password", "required": True},
+    ]
+    return render_form(request, "비밀번호 변경", fields, "/account/password")
+
+# 내 비밀번호 변경 처리
+@app.post("/account/password", response_class=HTMLResponse)
+def account_password_submit(
+    request: Request, db: OrmSession = Depends(get_db),
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...)
+):
+    require_login(request)
+
+    if new_password != confirm_password:
+        return PlainTextResponse("새 비밀번호 확인이 일치하지 않습니다.", status_code=400)
+    if len(new_password) < 8:
+        return PlainTextResponse("새 비밀번호는 8자 이상이어야 합니다.", status_code=400)
+
+    emp_id = request.session["user"]["emp_id"]
+    auth = db.execute(select(EmployeeAuth).where(EmployeeAuth.emp_id == emp_id)).scalar_one_or_none()
+    if not auth:
+        raise HTTPException(status_code=404, detail="계정 정보를 찾을 수 없습니다.")
+
+    if not verify_and_upgrade_password(db, auth, current_password):
+        return PlainTextResponse("현재 비밀번호가 올바르지 않습니다.", status_code=400)
+
+    auth.pw_hash = hash_password(new_password)
+    auth.pw_salt = None
+    db.commit()
+
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=HTTP_302_FOUND)
 
 # ------------------------------------------------------------------------------
 #// 유틸: 셀렉트 옵션
@@ -855,6 +917,17 @@ def employees_delete(request: Request, eid: int, db: OrmSession = Depends(get_db
     if e: db.delete(e); db.commit()
     return RedirectResponse(url="/employees", status_code=HTTP_302_FOUND)
 
+@app.post("/employees/reset_password/{eid}", response_class=PlainTextResponse)
+def employees_reset_password(request: Request, eid: int, db: OrmSession = Depends(get_db)):
+    require_login(request); require_master(request)
+    auth = db.execute(select(EmployeeAuth).where(EmployeeAuth.emp_id == eid)).scalar_one_or_none()
+    if not auth:
+        raise HTTPException(status_code=404, detail="해당 직원의 로그인 계정(EmployeeAuth)이 없습니다.")
+    temp = _gen_temp_password(10)
+    auth.pw_hash = hash_password(temp)
+    auth.pw_salt = None
+    db.commit()
+    return PlainTextResponse(f"임시 비밀번호: {temp}\n(안전한 방법으로 사용자에게 전달하세요)")
 
 # ------------------------------------------------------------------------------
 #// 협력사 / 현장 / 상세현장 (기본 정렬: ID ASC)
