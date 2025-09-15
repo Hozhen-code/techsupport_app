@@ -1,13 +1,13 @@
 # app.py — NAIZ 전산프로그램
 import os
 import json
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List, Dict, Any
 import hashlib, hmac, secrets, string
 from passlib.hash import bcrypt, argon2
 from urllib.parse import quote
 from fastapi import FastAPI, Request, Form, Depends, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_302_FOUND
@@ -17,6 +17,7 @@ from sqlalchemy import (
     )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session as OrmSession
 from fastapi.templating import Jinja2Templates
+import io, csv
 
 
 # ------------------------------------------------------------------------------
@@ -87,6 +88,28 @@ def require_master(request: Request):
 def require_tech(request: Request):
     # ★ MASTER도 허용
     require_role_any(request, "TECH", "MASTER")
+
+def csv_response(filename: str, headers, rows):
+    # 헤더 라벨 뽑기
+    def hlabel(h):
+        if isinstance(h, dict):  return h.get("label", "")
+        if isinstance(h, tuple): return h[0]
+        return str(h)
+    labels = [hlabel(h) for h in headers]
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(labels)
+    for r in rows:
+        w.writerow([("" if v is None else v) for v in r])
+
+    data = buf.getvalue().encode("utf-8-sig")  # 엑셀 호환 BOM
+    return Response(
+        content=data,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
 
 # ------------------------------------------------------------------------------
 #// DB 초기화 (SQLite FK 강제)
@@ -637,23 +660,26 @@ def events_json(
 # ------------------------------------------------------------------------------
 #// 제네릭 렌더
 # ------------------------------------------------------------------------------
-def render_list(request: Request, title, headers, rows, routes):
+def render_list(
+    request: Request,
+    title: str,
+    headers: List[Any],
+    rows: List[List[Any]],
+    routes: Dict[str, Any],
+    filters: Optional[Dict[str, Any]] = None,   # ← 추가
+):
     """
     headers 원소 형식:
-      - "라벨"                       -> 기본 좌측 정렬, 정렬가능
-      - ("라벨", "th-right th-bold") -> 클래스 직접 지정
-      - {
-          "label": "라벨",
-          "align": "left|center|right",  # ★ TH 정렬 바꾸려면 여기 값 사용
-          "bold": True|False,            # ★ TH 볼드 여부
-          "class": "추가 TH 클래스",
-          "nosort": True|False,          # ★ 정렬 비활성
-          "format": "money|int|...",     # ★ 셀 포맷(templates/generic_list.html에서 적용)
-          "td_class": "td-right",        # ★ TD 클래스(셀 정렬/스타일)
-          # "td" / "cell_class" 도 동의어로 인식
-        }
+      - "라벨"
+      - ("라벨", "th-right th-bold")
+      - { "label": "...", "align": "left|center|right", "bold": True|False,
+          "class": "추가 TH 클래스", "nosort": True|False,
+          "format": "money|int|...", "td_class": "td-right" }
     """
-    # ★ 전역 기본: 모든 칼럼 헤더는 좌측정렬(th-left)
+    # 기본값 & 정규화
+    routes = routes or {}
+    filters = filters or {}
+
     norm_headers = []
     for h in headers:
         base = {"label": "", "class": "th-left", "nosort": False, "format": None, "td_class": ""}
@@ -680,7 +706,6 @@ def render_list(request: Request, title, headers, rows, routes):
                 "format":  h.get("format"),
                 "td_class": (h.get("td_class") or h.get("td") or h.get("cell_class") or "").strip(),
             })
-
         else:
             base["label"] = str(h)
 
@@ -691,9 +716,9 @@ def render_list(request: Request, title, headers, rows, routes):
         "title": title,
         "headers": norm_headers,
         "rows": rows,
-        "routes": routes
+        "routes": routes,
+        "filters": filters,      # ← 추가 (템플릿에서 필터바 렌더)
     })
-
 
 def render_form(request: Request, title: str, fields: List[Dict[str, Any]], action: str, method: str = "post"):
     return templates.TemplateResponse("generic_form.html", {
@@ -1200,14 +1225,106 @@ def site_locations_delete(request: Request, lid: int, db: OrmSession = Depends(g
 #// CS: 요청 / 일정 (일정은 TECH만 등록/수정/삭제, 요청은 모두 가능)
 #// ------------------------------------------------------------------------------
 @app.get("/cs_requests", response_class=HTMLResponse)
-def cs_requests_list(request: Request, db: OrmSession = Depends(get_db)):
+def cs_requests_list(
+    request: Request,
+    db: OrmSession = Depends(get_db),
+    site_id: Optional[str] = None,   # 문자열로 받기
+    requester: Optional[str] = None,
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+):
     require_login(request)
-    q = db.query(CSRequest).outerjoin(Site)
-    rows=[[r.request_id, r.requester_name, (r.site.name if r.site else ""), r.status, r.created_at]
-          for r in q.order_by(CSRequest.request_id.desc()).all()]
-    return render_list(request,"CS 요청",["ID","요청자","현장","상태","생성"],rows,{
-        "new":"/cs_requests/new","edit":"/cs_requests/edit/{id}","delete":"/cs_requests/delete/{id}"
-    })
+
+    qset = db.query(CSRequest).outerjoin(Site)
+
+    site_id_i = _to_int_or_none(site_id)
+    if site_id_i:
+        qset = qset.filter(CSRequest.site_id == site_id_i)
+    if status:
+        qset = qset.filter(CSRequest.status == status)
+    if requester:
+        qset = qset.filter(CSRequest.requester_name.ilike(f"%{requester}%"))
+    if q:
+        like = f"%{q}%"
+        qset = qset.filter(or_(
+            CSRequest.content.ilike(like),
+            Site.name.ilike(like),
+            CSRequest.requester_name.ilike(like),
+        ))
+
+    rows = [
+        [r.request_id, r.requester_name, (r.site.name if r.site else ""), r.status, r.created_at]
+        for r in qset.order_by(CSRequest.request_id.desc()).all()
+    ]
+    headers = ["ID","요청자","현장","상태","생성"]
+
+    # CSV 내보내기 (?export=csv)
+    if (request.query_params.get("export") or "").lower() == "csv":
+        return csv_response("cs_requests.csv", headers, rows)
+    
+    filters = {
+        "new_label": "요청 등록",
+        "site_options": options_sites(db),
+        "site_id": site_id or "",
+        "person_label": "요청자",
+        "person_name": "requester",
+        "person_options": None,              # 텍스트 입력
+        "person_value": requester or "",
+        "status_options": [("requested","requested"),("accepted","accepted"),
+                           ("rejected","rejected"),("scheduled","scheduled")],
+        "status": status or "",
+        "q": q or "",
+    }
+
+    return render_list(request, "CS 요청", headers, rows,{
+        "new":    "/cs_requests/new",
+        "edit":   "/cs_requests/edit/{id}",
+        "delete": "/cs_requests/delete/{id}",
+        "export": "/cs_requests/export.csv",
+    },
+    filters=filters
+    )
+
+
+@app.get("/cs_requests/export.csv")
+def cs_requests_export_csv(request: Request, db: OrmSession = Depends(get_db), q: Optional[str] = None):
+    require_login(request)
+
+    qset = db.query(CSRequest).outerjoin(Site)
+    if q:
+        like = f"%{q}%"
+        qset = qset.filter(
+            or_(
+                CSRequest.requester_name.ilike(like),
+                CSRequest.content.ilike(like),
+                Site.name.ilike(like),
+                CSRequest.status.ilike(like),
+            )
+        )
+
+    rows = qset.order_by(CSRequest.request_id.desc()).all()
+
+    buf = io.StringIO(newline="")
+    writer = csv.writer(buf)
+    writer.writerow(["ID", "요청자", "현장", "상태", "생성", "내용"])
+    for r in rows:
+        writer.writerow([
+            r.request_id,
+            r.requester_name,
+            r.site.name if r.site else "",
+            r.status,
+            (r.created_at or ""),
+            (r.content or "").replace("\r", " ").replace("\n", " "),
+        ])
+
+    csv_bytes = ("\ufeff" + buf.getvalue()).encode("utf-8")  # UTF-8 BOM for Excel
+    filename = f"cs_requests_{datetime.now().strftime('%Y%m%d')}.csv"
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @app.get("/cs_requests/new", response_class=HTMLResponse)
 def cs_requests_new(request: Request, db: OrmSession = Depends(get_db)):
@@ -1271,23 +1388,133 @@ def cs_requests_delete(request: Request, rid: int, db: OrmSession = Depends(get_
     if r: db.delete(r); db.commit()
     return RedirectResponse(url="/cs_requests", status_code=HTTP_302_FOUND)
 
-
 @app.get("/cs_schedules", response_class=HTMLResponse)
-def cs_schedules_list(request: Request, db: OrmSession = Depends(get_db)):
+def cs_schedules_list(
+    request: Request,
+    db: OrmSession = Depends(get_db),
+    site_id: Optional[str] = None,
+    assignee: Optional[str] = None,
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+):
     require_login(request)
-    can_edit = has_role(request, "TECH", "MASTER")  # ★ 둘 다 허용
+    can_edit = has_role(request, "TECH", "MASTER")
 
-    q = db.query(CSSchedule).outerjoin(Site)
+    qset = db.query(CSSchedule).outerjoin(Site)
+
+    site_id_i = _to_int_or_none(site_id)
+    assignee_i = _to_int_or_none(assignee)
+
+    if site_id_i:
+        qset = qset.filter(CSSchedule.site_id == site_id_i)
+    if status:
+        qset = qset.filter(CSSchedule.status == status)
+    if assignee_i:
+        qset = (
+            qset.join(CSScheduleAssignee, CSSchedule.schedule_id == CSScheduleAssignee.schedule_id)
+                .filter(CSScheduleAssignee.emp_id == assignee_i)
+        )
+    if q:
+        like = f"%{q}%"
+        qset = qset.filter(or_(
+            CSSchedule.request_content.ilike(like),
+            CSSchedule.work_content.ilike(like),
+            CSSchedule.extra_content.ilike(like),
+            Site.name.ilike(like),
+        ))
+
     rows = []
-    for s in q.order_by(CSSchedule.schedule_id.desc()).all():
+    for s in qset.order_by(CSSchedule.schedule_id.desc()).all():
         assignees = ", ".join([a.employee.name for a in s.sch_assignees])
-        rows.append([s.schedule_id, (s.site.name if s.site else ""), s.start_date, s.end_date or "", s.status, assignees])
+        rows.append([
+            s.schedule_id,
+            (s.site.name if s.site else ""),
+            s.start_date,
+            s.end_date or "",
+            s.status,
+            assignees
+        ])
 
-    return render_list(request, "CS 일정", ["ID","현장","시작","종료","상태","담당자"], rows, {
+    headers = ["ID","현장","시작","종료","상태","담당자"]
+
+    # CSV 내보내기 (?export=csv)
+    if (request.query_params.get("export") or "").lower() == "csv":
+        return csv_response("cs_schedules.csv", headers, rows)
+
+    # ▼ 상단 필터 UI에 필요한 값
+    filters = {
+        "new_label": "일정 등록",
+        "site_options": options_sites(db),
+        "site_id": site_id or "",
+        "person_label": "담당자",
+        "person_name": "assignee",
+        "person_options": options_employees(db),  # 셀렉트 박스로 표시
+        "person_value": assignee or "",
+        "status_options": [
+            ("todo","todo"),
+            ("in_progress","in_progress"),
+            ("done","done"),
+            ("lab_request","lab_request"),
+        ],
+        "status": status or "",
+        "q": q or "",
+    }
+
+    return render_list(request, "CS 일정", headers, rows,{
         "new":    "/cs_schedules/new"         if can_edit else None,
         "edit":   "/cs_schedules/edit/{id}"   if can_edit else None,
-        "delete": "/cs_schedules/delete/{id}" if can_edit else None
-    })
+        "delete": "/cs_schedules/delete/{id}" if can_edit else None,
+        "export": "/cs_schedules/export.csv",
+    }
+    ,filters=filters
+    )
+
+
+
+@app.get("/cs_schedules/export.csv")
+def cs_schedules_export_csv(request: Request, db: OrmSession = Depends(get_db), q: Optional[str] = None):
+    require_login(request)
+
+    qset = db.query(CSSchedule).outerjoin(Site)
+    if q:
+        like = f"%{q}%"
+        qset = qset.filter(
+            or_(
+                CSSchedule.request_content.ilike(like),
+                CSSchedule.work_content.ilike(like),
+                CSSchedule.extra_content.ilike(like),
+                Site.name.ilike(like),
+                CSSchedule.status.ilike(like),
+            )
+        )
+
+    rows = qset.order_by(CSSchedule.schedule_id.desc()).all()
+
+    buf = io.StringIO(newline="")
+    writer = csv.writer(buf)
+    writer.writerow(["ID", "현장", "시작", "종료", "상태", "담당자", "요청요약", "작업내용", "추가내용", "비고"])
+    for s in rows:
+        assignees = ", ".join([a.employee.name for a in s.sch_assignees])
+        writer.writerow([
+            s.schedule_id,
+            (s.site.name if s.site else ""),
+            s.start_date,
+            s.end_date or "",
+            s.status,
+            assignees,
+            (s.request_content or "").replace("\r", " ").replace("\n", " "),
+            (s.work_content or "").replace("\r", " ").replace("\n", " "),
+            (s.extra_content or "").replace("\r", " ").replace("\n", " "),
+            (s.note or "").replace("\r", " ").replace("\n", " "),
+        ])
+
+    csv_bytes = ("\ufeff" + buf.getvalue()).encode("utf-8")  # UTF-8 BOM
+    filename = f"cs_schedules_{datetime.now().strftime('%Y%m%d')}.csv"
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @app.get("/cs_schedules/new", response_class=HTMLResponse)

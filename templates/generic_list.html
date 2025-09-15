@@ -3,7 +3,7 @@
 
 {% block head %}
 <style>
-  /* 정렬 표시용 미니 아이콘(기존 테이블 스타일은 건드리지 않음) */
+  /* 표 헤더 정렬 아이콘 */
   .table thead th { position: relative; user-select: none; }
   .table thead th.nosort { cursor: default; }
   .table thead th.sortable { cursor: pointer; }
@@ -13,6 +13,15 @@
   }
   .table thead th.sort-asc  .sort-ind::after { content: "▲"; }
   .table thead th.sort-desc .sort-ind::after { content: "▼"; }
+
+  /* 상단 필터바 */
+  .filterbar {
+    display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;
+  }
+  .filterbar .group { display:flex; flex-direction:column; gap:6px; }
+  .filterbar .group .label { color:#8b9099; font-size:12px; }
+  .filterbar .grow { flex:1; min-width:240px; }
+  .btns { display:flex; gap:6px; }
 </style>
 {% endblock %}
 
@@ -21,21 +30,105 @@
 
 <div class="card">
   <div class="card-body">
-    <div class="mb-2">
-      {% if routes.new %}<a href="{{ routes.new }}" class="btn btn-primary btn-small">+ 등록</a>{% endif %}
-    </div>
+
+    {# === 캘린더식 필터바 (뷰에서 filters 넘겨주면 표시) === #}
+    {% if filters %}
+      <form method="get" class="filterbar" role="search">
+        <div class="group" style="min-width:180px">
+          <div class="label">현장</div>
+          <select name="site_id" class="form-control">
+            <option value="">전체</option>
+            {% for val, text in filters.site_options %}
+              <option value="{{ val }}" {% if (filters.site_id|string)==(val|string) %}selected{% endif %}>
+                {{ text }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="group" style="min-width:180px">
+          <div class="label">{{ filters.person_label or '담당자' }}</div>
+
+          {# 담당자 드롭다운 or 요청자 텍스트 #}
+          {% if filters.person_options %}
+            <select name="{{ filters.person_name or 'assignee' }}" class="form-control">
+              <option value="">전체</option>
+              {% for val, text in filters.person_options %}
+                <option value="{{ val }}" {% if (filters.person_value|string)==(val|string) %}selected{% endif %}>
+                  {{ text }}
+                </option>
+              {% endfor %}
+            </select>
+          {% else %}
+            <input type="text"
+                   name="{{ filters.person_name or 'requester' }}"
+                   class="form-control"
+                   value="{{ filters.person_value or '' }}"
+                   placeholder="{{ filters.person_label or '담당자' }}">
+          {% endif %}
+        </div>
+
+        <div class="group" style="min-width:160px">
+          <div class="label">상태</div>
+          <select name="status" class="form-control">
+            <option value="">전체</option>
+            {% for val, text in filters.status_options %}
+              <option value="{{ val }}" {% if (filters.status or '')==(val|string) %}selected{% endif %}>
+                {{ text }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="group grow">
+          <div class="label">검색</div>
+          <input type="text" name="q" class="form-control" placeholder="내용/현장명"
+                 value="{{ filters.q or '' }}">
+        </div>
+
+        <div class="btns">
+          <button class="btn btn-outline btn-small" type="submit">적용</button>
+
+          {% if routes.export %}
+            {# 현재 쿼리스트링 유지한 채 CSV 링크 #}
+            <a class="btn btn-outline btn-small"
+               href="{{ routes.export }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+              CSV
+            </a>
+          {% endif %}
+
+          {% if routes.new %}
+            <a href="{{ routes.new }}" class="btn btn-primary btn-small">
+              + {{ filters.new_label or '등록' }}
+            </a>
+          {% endif %}
+        </div>
+      </form>
+    {% else %}
+      {# === 기본 상단바 (필터 없을 때) === #}
+      <div class="mb-2" style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div>
+          {% if routes.new %}<a href="{{ routes.new }}" class="btn btn-primary btn-small">+ 등록</a>{% endif %}
+        </div>
+        <div class="btns">
+          {% if routes.export %}
+            <a class="btn btn-outline btn-small"
+               href="{{ routes.export }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+              CSV
+            </a>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
 
     <table class="table" id="grid">
       <thead>
         <tr>
           {% for h in headers %}
             {% set is_sortable = (h.nosort is not defined) or (not h.nosort) %}
-            <th
-              class="{{ h.class }} {% if is_sortable %}sortable{% else %}nosort{% endif %}"
-              data-col="{{ loop.index0 }}"
-            >
-              {{ h.label }}
-              <span class="sort-ind"></span>
+            <th class="{{ h.class }} {% if is_sortable %}sortable{% else %}nosort{% endif %}"
+                data-col="{{ loop.index0 }}">
+              {{ h.label }} <span class="sort-ind"></span>
             </th>
           {% endfor %}
           {% if routes.edit or routes.delete or routes.child %}
@@ -45,42 +138,47 @@
       </thead>
       <tbody>
         {% for row in rows %}
-        <tr>
-          {% for col in row %}
-            {% set meta = headers[loop.index0] if headers|length > loop.index0 else {} %}
-            {% set td_cls = meta.td_class if meta.td_class is defined else '' %}
-            <td class="{{ td_cls }}">
-              {% if meta.format in ['money','int'] %}
-                {{ col|comma }}
-              {% else %}
-                {{ col }}
-              {% endif %}
-            </td>
-          {% endfor %}
+          <tr>
+            {% for col in row %}
+              {% set meta = headers[loop.index0] if headers|length > loop.index0 else {} %}
+              {% set td_cls = meta.td_class if meta.td_class is defined else '' %}
+              <td class="{{ td_cls }}">
+                {% if meta.format in ['money','int'] %}
+                  {{ col|comma }}
+                {% else %}
+                  {{ col }}
+                {% endif %}
+              </td>
+            {% endfor %}
 
-          {% if routes.edit or routes.delete or routes.child %}
-          <td class="actions td-center">
-            {% if routes.child %}
-              <a class="btn btn-outline btn-small" href="{{ routes.child|replace('{id}', row[0]|string) }}">자세히</a>
+            {% if routes.edit or routes.delete or routes.child %}
+              <td class="actions td-center">
+                {% if routes.child %}
+                  <a class="btn btn-outline btn-small" href="{{ routes.child|replace('{id}', row[0]|string) }}">자세히</a>
+                {% endif %}
+                {% if routes.edit %}
+                  <a class="btn btn-outline btn-small" href="{{ routes.edit|replace('{id}', row[0]|string) }}">수정</a>
+                {% endif %}
+                {% if routes.delete %}
+                  <form method="post" action="{{ routes.delete|replace('{id}', row[0]|string) }}"
+                        style="display:inline" onsubmit="return confirm('삭제하시겠습니까?');">
+                    <button class="btn btn-danger btn-small" type="submit">삭제</button>
+                  </form>
+                {% endif %}
+              </td>
             {% endif %}
-            {% if routes.edit %}
-              <a class="btn btn-outline btn-small" href="{{ routes.edit|replace('{id}', row[0]|string) }}">수정</a>
-            {% endif %}
-            {% if routes.delete %}
-              <form method="post" action="{{ routes.delete|replace('{id}', row[0]|string) }}" style="display:inline" onsubmit="return confirm('삭제하시겠습니까?');">
-                <button class="btn btn-danger btn-small" type="submit">삭제</button>
-              </form>
-            {% endif %}
-          </td>
-          {% endif %}
-        </tr>
+          </tr>
         {% else %}
-        <tr>
-          <td class="text-center muted" colspan="{{ headers|length + (1 if (routes.edit or routes.delete or routes.child) else 0) }}">데이터가 없습니다.</td>
-        </tr>
+          <tr>
+            <td class="text-center muted"
+                colspan="{{ headers|length + (1 if (routes.edit or routes.delete or routes.child) else 0) }}">
+              데이터가 없습니다.
+            </td>
+          </tr>
         {% endfor %}
       </tbody>
     </table>
+
   </div>
 </div>
 {% endblock %}
@@ -89,7 +187,7 @@
 <script>
 (function(){
   const table = document.getElementById('grid');
-  if (!table) return;
+  if (!table || !table.tHead || !table.tBodies[0]) return;
 
   const getText = (cell) => (cell.textContent || '').trim();
 
@@ -97,9 +195,9 @@
   const detectType = (idx) => {
     const rows = Array.from(table.tBodies[0].rows);
     for (const tr of rows) {
-      const v = getText(tr.cells[idx]);
+      const v = getText(tr.cells[idx] || {});
       if (!v) continue;
-      if (/^-?\d{1,3}(?:,\d{3})*(?:\.\d+)?$/.test(v)) return 'number'; // 1,234 형식도 숫자로
+      if (/^-?\d{1,3}(?:,\d{3})*(?:\.\d+)?$/.test(v)) return 'number'; // 1,234 도 숫자
       if (/^-?\d+(?:\.\d+)?$/.test(v)) return 'number';
       if (/^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?$/.test(v)) return 'date';
     }
@@ -107,15 +205,13 @@
   };
 
   const comparators = {
-    number: (a,b)=> (parseFloat(a.replace(/,/g,''))||0) - (parseFloat(b.replace(/,/g,''))||0),
-    date:   (a,b)=> (new Date(a)).getTime() - (new Date(b)).getTime(),
-    string: (a,b)=> a.localeCompare(b)
+    number: (a,b)=> (parseFloat((a||'').replace(/,/g,''))||0) - (parseFloat((b||'').replace(/,/g,''))||0),
+    date:   (a,b)=> (new Date(a||0)).getTime() - (new Date(b||0)).getTime(),
+    string: (a,b)=> (a||'').localeCompare(b||'')
   };
 
   const clearIndicators = () => {
-    table.querySelectorAll('thead th').forEach(th=>{
-      th.classList.remove('sort-asc','sort-desc');
-    });
+    table.querySelectorAll('thead th').forEach(th=> th.classList.remove('sort-asc','sort-desc'));
   };
 
   table.tHead.addEventListener('click', (e)=>{
@@ -123,6 +219,8 @@
     if (!th || th.classList.contains('nosort') || !th.classList.contains('sortable')) return;
 
     const idx = parseInt(th.dataset.col, 10);
+    if (Number.isNaN(idx)) return;
+
     const type = detectType(idx);
     const dir  = th.classList.contains('sort-asc') ? 'desc' : 'asc';
 
@@ -131,7 +229,7 @@
 
     const tbody = table.tBodies[0];
     const rows = Array.from(tbody.rows).map((tr, i)=>({
-      key: getText(tr.cells[idx]),
+      key: getText(tr.cells[idx] || {}),
       tr, i
     }));
 
@@ -139,7 +237,7 @@
 
     rows.sort((A, B)=>{
       const base = cmp(A.key, B.key);
-      // 안정 정렬(동일 값이면 기존 순서 유지)
+      // 안정 정렬(키 동일 시 기존 순서 유지)
       return dir === 'asc' ? (base || (A.i - B.i)) : (-(base) || (A.i - B.i));
     });
 
