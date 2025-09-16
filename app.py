@@ -13,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_302_FOUND
 from sqlalchemy import (
     create_engine, event, Column, Integer, String, Text, DateTime, ForeignKey,
-    UniqueConstraint, or_, select, func
+    UniqueConstraint, or_, select, func, inspect
     )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session as OrmSession
 from fastapi.templating import Jinja2Templates
@@ -153,10 +153,93 @@ def default_color(status: str) -> str:
         "lab_request": "#8b5cf6",  # 보라
     }.get(s, "#3b82f6")
 
+def _snap_columns(obj):
+    """컬럼만 dict로 스냅샷 (datetime은 isoformat)."""
+    def _jsonable(v):
+        from datetime import datetime, date
+        if isinstance(v, (datetime, date)): return v.isoformat()
+        return v
+    data = {}
+    mapper = inspect(obj).mapper
+    for col in mapper.columns:
+        key = col.key
+        # 너무 시끄러운 컬럼은 기본 제외(필요 시 주석 처리)
+        if key in ("updated_at",): 
+            continue
+        data[key] = _jsonable(getattr(obj, key))
+    return data
+
+def _diff_dict(before: dict, after: dict):
+    """달라진 것만 {col: [old, new]} 형태로."""
+    out = {}
+    keys = set(before) | set(after)
+    for k in keys:
+        if before.get(k) != after.get(k):
+            out[k] = [before.get(k), after.get(k)]
+    return out
+
+def log_change(db, request: Request, obj, action: str, diff: dict):
+    """감사 로그 한 건 기록."""
+    user = (request.session.get("user") or {})
+    try:
+        pk_key = inspect(obj).primary_key[0].key
+        pk_val = getattr(obj, pk_key, None)
+    except Exception:
+        pk_val = None
+    db.add(AuditLog(
+        table_name=obj.__tablename__,
+        row_pk=str(pk_val),
+        action=action,
+        actor_emp_id=user.get("emp_id"),
+        actor_login_id=user.get("login_id"),
+        actor_name=user.get("name"),   # 없다면 None
+        ip=(request.client.host if request and request.client else None),
+        path=(str(request.url.path) if request and request.url else None),
+        diff=json.dumps(diff, ensure_ascii=False)
+    ))
+
+def soft_delete(db, request: Request, obj):
+    """deleted_at/deleted_by 지원 시 소프트 삭제, 아니면 하드 삭제."""
+    if hasattr(obj, "deleted_at"):
+        obj.deleted_at = func.datetime("now", "localtime")
+        if hasattr(obj, "deleted_by"):
+            user = request.session.get("user") or {}
+            obj.deleted_by = user.get("emp_id")
+        # 로그
+        before = _snap_columns(obj);    # before에 deleted_… 반영 전값(None)일 수 있음
+        # flush 전후 혼란 피하려고 diff는 간단히 표시
+        diff = {"deleted_at": [None, "SET"], "deleted_by": [None, getattr(obj, "deleted_by", None)]}
+        log_change(db, request, obj, "SOFT_DELETE", diff)
+        db.commit()
+    else:
+        # 하드 삭제 + 로그
+        diff = _snap_columns(obj)
+        log_change(db, request, obj, "DELETE", diff)
+        db.delete(obj); db.commit()
+
+def active_only(q, Model):
+    """deleted_at 컬럼 있으면 살아있는 레코드만."""
+    if hasattr(Model, "deleted_at"):
+        return q.filter(getattr(Model, "deleted_at").is_(None))
+    return q
 
 # ------------------------------------------------------------------------------
 #// 모델 (최신 DDL 반영)
 # ------------------------------------------------------------------------------
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    log_id = Column(Integer, primary_key=True)
+    table_name = Column(String, nullable=False)
+    row_pk = Column(String, nullable=False)
+    action = Column(String, nullable=False)  # INSERT / UPDATE / SOFT_DELETE / DELETE
+    actor_emp_id = Column(Integer, nullable=True)
+    actor_login_id = Column(String, nullable=True)
+    actor_name = Column(String, nullable=True)
+    ip = Column(String, nullable=True)
+    path = Column(String, nullable=True)
+    changed_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
+    diff = Column(Text)  # JSON (컬럼별 old/new)
+
 class Department(Base):
     __tablename__ = "departments"
     dept_id = Column(Integer, primary_key=True)
@@ -260,7 +343,10 @@ class CSRequest(Base):
     status = Column(String, nullable=False, default="requested")
     created_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
     updated_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, nullable=True)
     site = relationship("Site")
+    
 
 class CSRequestLocation(Base):
     __tablename__ = "cs_request_locations"
@@ -284,6 +370,8 @@ class CSSchedule(Base):
     color  = Column(String)
     created_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
     updated_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, nullable=True)
     site = relationship("Site")
     request = relationship("CSRequest")
 
@@ -344,7 +432,6 @@ def init_db():
 @app.on_event("startup")
 def on_startup():
     init_db()
-
 
 # ------------------------------------------------------------------------------
 #// 인증
@@ -515,16 +602,16 @@ def account_password_submit(
 #// 유틸: 셀렉트 옵션
 # ------------------------------------------------------------------------------
 def options_sites(db: OrmSession):
-    return [(s.site_id, s.name) for s in db.query(Site).order_by(Site.name).all()]
+    return [(s.site_id, s.name)for s in db.query(Site).filter(Site.deleted_at.is_(None)).order_by(Site.name).all()]
 
 def options_site_locations(db: OrmSession, site_id: Optional[int] = None):
-    q = db.query(SiteLocation).join(Site)
+    q = db.query(SiteLocation).join(Site).filter(Site.deleted_at.is_(None))
     if site_id:
         q = q.filter(SiteLocation.site_id == site_id)
     return [(l.location_id, f"[{l.site.name}] {l.name}") for l in q.order_by(Site.name, SiteLocation.name).all()]
 
 def options_employees(db: OrmSession):
-    return [(e.emp_id, e.name) for e in db.query(Employee).order_by(Employee.name).all()]
+    return [(e.emp_id, e.name) for e in db.query(Employee).filter(Employee.deleted_at.is_(None)).order_by(Employee.name).all()]
 
 def options_roles(db: OrmSession):
     return [(r.role_id, r.name) for r in db.query(Role).order_by(Role.name).all()]
@@ -537,6 +624,24 @@ def options_departments(db: OrmSession):
 
 def options_sw_products(db: OrmSession):
     return [(p.sw_id, p.sw_name) for p in db.query(SWProduct).order_by(SWProduct.sw_name).all()]
+
+def _snapshot_schedule(s: CSSchedule) -> dict:
+    return {
+        "schedule_id": s.schedule_id,
+        "request_id": s.request_id,
+        "site_id": s.site_id,
+        "start_date": s.start_date,
+        "end_date": s.end_date,
+        "status": s.status,
+        "request_content": s.request_content or "",
+        "work_content": s.work_content or "",
+        "extra_content": s.extra_content or "",
+        "note": s.note or "",
+        "color": s.color or "",
+        # 관계(M2M)도 함께 기록
+        "locations": [sl.location_id for sl in s.sch_locations],
+        "assignees": [sa.emp_id for sa in s.sch_assignees],
+    }
 
 
 # ------------------------------------------------------------------------------
@@ -565,15 +670,22 @@ def events_json(
     db: OrmSession = Depends(get_db),
     start: Optional[str] = None,
     end: Optional[str] = None,
-    site_id: Optional[int] = None,
-    assignee: Optional[int] = None,  # emp_id
+    site_id: Optional[str] = None,    # ← int -> str
+    assignee: Optional[str] = None,   # ← int -> str
     status: Optional[str] = None,
     q: Optional[str] = None,
 ):
+
     require_login(request)
 
     qset = db.query(CSSchedule).outerjoin(Site)
+    qset = qset.filter(or_(Site.deleted_at.is_(None), CSSchedule.site_id.is_(None)))
 
+    if "deleted_at" in CSSchedule.__table__.c:
+        qset = qset.filter(CSSchedule.__table__.c.deleted_at.is_(None))
+    else:
+        qset = qset.filter(CSSchedule.status != "deleted")
+    
     def _parse(d: Optional[str]) -> Optional[str]:
         if not d:
             return None
@@ -584,18 +696,20 @@ def events_json(
 
     s = _parse(start)
     e = _parse(end)
+    site_id_i = _to_int_or_none(site_id)
+    assignee_i = _to_int_or_none(assignee)
     if s:
         qset = qset.filter(CSSchedule.start_date >= s)
     if e:
         qset = qset.filter(CSSchedule.start_date <= e)
-    if site_id:
-        qset = qset.filter(CSSchedule.site_id == site_id)
+    if site_id_i:
+        qset = qset.filter(CSSchedule.site_id == site_id_i)
     if status:
         qset = qset.filter(CSSchedule.status == status)
-    if assignee:
+    if assignee_i:
         qset = (
             qset.join(CSScheduleAssignee, CSSchedule.schedule_id == CSScheduleAssignee.schedule_id)
-               .filter(CSScheduleAssignee.emp_id == assignee)
+               .filter(CSScheduleAssignee.emp_id == assignee_i)
         )
     if q:
         like = f"%{q}%"
@@ -623,7 +737,10 @@ def events_json(
 
     payload = []
     for r in rows:
-        assignees = [a.employee.name for a in r.sch_assignees]
+        assignees = [a.employee.name 
+                     for a in r.sch_assignees
+                     if not getattr(a.employee, "deleted_at", None)]
+        
         site_name = r.site.name if r.site else "-"
         title = f"[{site_name}] " + (", ".join(assignees) if assignees else "")
         evt_color = (r.color or "").strip() or default_color(r.status)
@@ -730,6 +847,26 @@ def render_form(request: Request, title: str, fields: List[Dict[str, Any]], acti
 #// 조직: 부서 / 직급 / 권한 / 직원(+권한)
 #//  - 기본 정렬: ID ASC
 # ------------------------------------------------------------------------------
+@app.get("/audit_logs", response_class=HTMLResponse)
+def audit_logs(request: Request, db: OrmSession = Depends(get_db), q: Optional[str] = None):
+    require_login(request); require_master(request)
+    qset = db.query(AuditLog).order_by(AuditLog.log_id.desc())
+    if q:
+        like = f"%{q}%"
+        qset = qset.filter(or_(
+            AuditLog.table_name.ilike(like),
+            AuditLog.action.ilike(like),
+            AuditLog.actor_login_id.ilike(like),
+            AuditLog.actor_name.ilike(like),
+            AuditLog.path.ilike(like),
+        ))
+    rows = [
+        [a.log_id, a.changed_at, a.table_name, a.row_pk, a.action, a.actor_login_id or "", a.actor_name or "", a.path or "", a.ip or "", a.diff or ""]
+        for a in qset.limit(500).all()
+    ]
+    headers = ["ID","시각","테이블","PK","행위","로그인ID","이름","경로","IP","변경내용(JSON)"]
+    return render_list(request, "감사 로그", headers, rows, {"new": None, "edit": None, "delete": None})
+
 @app.get("/departments", response_class=HTMLResponse)
 def departments_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request); require_master(request)
@@ -992,6 +1129,7 @@ def employees_reset_password(request: Request, eid: int, db: OrmSession = Depend
 def vendors_list(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request)
     # 생성 컬럼 제거
+    q = db.query(Vendor).filter(Vendor.deleted_at.is_(None))
     rows = [
         [v.vendor_id, v.name, v.ceo_name or "", v.phone or "", v.email or ""]
         for v in db.query(Vendor).order_by(Vendor.vendor_id.asc()).all()
@@ -1231,11 +1369,12 @@ def cs_requests_list(
     site_id: Optional[str] = None,   # 문자열로 받기
     requester: Optional[str] = None,
     status: Optional[str] = None,
-    q: Optional[str] = None,
+    q: Optional[str] = None
 ):
     require_login(request)
 
-    qset = db.query(CSRequest).outerjoin(Site)
+    qset = active_only(db.query(CSRequest).outerjoin(Site), CSRequest)
+    qset = qset.filter(or_(Site.deleted_at.is_(None), CSRequest.site_id.is_(None)))
 
     site_id_i = _to_int_or_none(site_id)
     if site_id_i:
@@ -1345,6 +1484,9 @@ def cs_requests_new_submit(
     require_login(request)
     r = CSRequest(site_id=site_id or None, requester_name=requester_name.strip(), content=content, status=status)
     db.add(r); db.commit(); db.refresh(r)
+    log_change(db, request, r, "INSERT", _snap_columns(r))
+    db.commit()
+
     if locations:
         if isinstance(locations, str): locations = [locations]
         for lid in locations:
@@ -1372,20 +1514,32 @@ def cs_requests_edit_submit(
 ):
     require_login(request)
     r = db.get(CSRequest, rid); assert r
-    r.site_id=site_id or None; r.requester_name=requester_name.strip(); r.content=content; r.status=status
+    before = _snap_columns(r)
+
+    r.site_id=site_id or None
+    r.requester_name=requester_name.strip()
+    r.content=content
+    r.status=status
     db.query(CSRequestLocation).filter(CSRequestLocation.request_id==rid).delete()
     if locations:
         if isinstance(locations, str): locations = [locations]
         for lid in locations:
             db.add(CSRequestLocation(request_id=rid, location_id=int(lid)))
     db.commit()
+
+    after = _snap_columns(r)
+    diff = _diff_dict(before, after)
+    if diff:
+        log_change(db, request, r, "UPDATE", diff)
+        db.commit()
+
     return RedirectResponse(url="/cs_requests", status_code=HTTP_302_FOUND)
 
 @app.post("/cs_requests/delete/{rid}")
 def cs_requests_delete(request: Request, rid: int, db: OrmSession = Depends(get_db)):
     require_login(request)
     r = db.get(CSRequest, rid)
-    if r: db.delete(r); db.commit()
+    if r: soft_delete(db, request, r)
     return RedirectResponse(url="/cs_requests", status_code=HTTP_302_FOUND)
 
 @app.get("/cs_schedules", response_class=HTMLResponse)
@@ -1395,15 +1549,21 @@ def cs_schedules_list(
     site_id: Optional[str] = None,
     assignee: Optional[str] = None,
     status: Optional[str] = None,
-    q: Optional[str] = None,
+    q: Optional[str] = None
 ):
     require_login(request)
     can_edit = has_role(request, "TECH", "MASTER")
 
-    qset = db.query(CSSchedule).outerjoin(Site)
+    qset = active_only(db.query(CSSchedule).outerjoin(Site), CSSchedule)
+    qset = qset.filter(or_(Site.deleted_at.is_(None), CSSchedule.site_id.is_(None)))
 
     site_id_i = _to_int_or_none(site_id)
     assignee_i = _to_int_or_none(assignee)
+
+    if "deleted_at" in CSSchedule.__table__.c:
+        qset = qset.filter(CSSchedule.__table__.c.deleted_at.is_(None))
+    else:
+        qset = qset.filter(CSSchedule.status != "deleted")
 
     if site_id_i:
         qset = qset.filter(CSSchedule.site_id == site_id_i)
@@ -1425,7 +1585,11 @@ def cs_schedules_list(
 
     rows = []
     for s in qset.order_by(CSSchedule.schedule_id.desc()).all():
-        assignees = ", ".join([a.employee.name for a in s.sch_assignees])
+        assignees = ", ".join([
+            a.employee.name 
+            for a in s.sch_assignees
+            if not getattr(a.employee, "deleted_at", None)])
+        
         rows.append([
             s.schedule_id,
             (s.site.name if s.site else ""),
@@ -1584,6 +1748,13 @@ def cs_schedules_new_submit(
             db.add(CSScheduleAssignee(schedule_id=s.schedule_id, emp_id=int(eid)))
 
     db.commit()
+
+    try:
+        log_change(db, request, s, "INSERT", _snapshot_schedule(s))
+        db.commit()
+    except Exception:
+        pass
+
     return RedirectResponse(url="/cs_schedules", status_code=HTTP_302_FOUND)
 
 
@@ -1629,6 +1800,7 @@ def cs_schedules_edit_submit(
     site_id_i    = _to_int_or_none(site_id)
 
     s = db.get(CSSchedule, sid); assert s
+    before = _snapshot_schedule(s)
     s.request_id = request_id_i
     s.site_id    = site_id_i
     s.start_date = start_date
@@ -1655,15 +1827,25 @@ def cs_schedules_edit_submit(
             db.add(CSScheduleAssignee(schedule_id=sid, emp_id=int(eid)))
 
     db.commit()
+
+    try:
+        db.refresh(s)
+        after = _snapshot_schedule(s)
+        diff = _diff_dict(before, after)
+        if diff:
+            log_change(db, request, s, "UPDATE", diff)
+            db.commit()
+    except Exception:
+        pass
+
     return RedirectResponse(url="/cs_schedules", status_code=HTTP_302_FOUND)
 
 @app.post("/cs_schedules/delete/{sid}")
 def cs_schedules_delete(request: Request, sid: int, db: OrmSession = Depends(get_db)):
-    require_login(request); require_tech(request)  # ★ TECH 강제
+    require_login(request); require_tech(request)
     s = db.get(CSSchedule, sid)
-    if s: db.delete(s); db.commit()
+    if s: soft_delete(db, request, s)
     return RedirectResponse(url="/cs_schedules", status_code=HTTP_302_FOUND)
-
 
 # ------------------------------------------------------------------------------
 #// 제품: SW / 서비스 (기본 정렬: ID ASC)
