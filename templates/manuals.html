@@ -1,0 +1,195 @@
+<!-- manuals.html -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>메뉴얼</title>
+  <style>
+    .layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; height: calc(100vh - 40px); }
+    .left { background:#f5f7fb; padding:12px; overflow:auto; }
+    .right { padding:12px; overflow:auto; border-left:1px solid #e1e5ee; }
+    .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+    .tree ul { list-style:none; padding-left:18px; }
+    .tree li { margin:2px 0; }
+    .hit { background: #fff3bf; }
+    .pill { display:inline-block; padding:3px 8px; margin:2px; border-radius:12px; background:#e7eefc; cursor:pointer; }
+    .pill.active { background:#d0defc; font-weight:600; }
+    .btn { padding:6px 10px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; }
+    .btn.primary { background:#1f6feb; color:#fff; border-color:#1f6feb; }
+    .muted { color:#6b7280; font-size:12px; }
+    .tri { width:14px; text-align:center; display:inline-block; cursor:pointer; }
+    .node-row { display:flex; align-items:center; gap:6px; }
+    .search { width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:6px; }
+    .sticky-top { position:sticky; top:0; background:#f5f7fb; padding-bottom:8px; }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside class="left">
+    <div class="sticky-top">
+      <div style="margin-bottom:8px;">
+        <label class="muted">버전</label>
+        <select id="version" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:6px;">
+          {% for v in versions %}
+          <option value="{{v.id}}">{{v.name}}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-bottom:8px;">
+        <label class="muted">SW (다중선택)</label>
+        <div id="sw-box">
+          {% for s in software %}
+          <span data-id="{{s.id}}" class="pill">{{s.name}}</span>
+          {% endfor %}
+        </div>
+      </div>
+      <input id="q" class="search" placeholder="검색(트리에서 일치 항목 자동 펼치기)" />
+      <div class="toolbar" style="margin-top:8px;">
+        <button class="btn" id="expand">+ 모두 펼치기</button>
+        <button class="btn" id="collapse">- 모두 접기</button>
+      </div>
+    </div>
+    <div class="tree" id="tree"></div>
+  </aside>
+  <main class="right">
+    <div class="toolbar">
+      <button class="btn primary" id="export">PDF 내보내기(체크만)</button>
+      <span class="muted">선택 노드 상세/첨부 업로드는 아래에서</span>
+    </div>
+    <div id="detail">
+      <p class="muted">좌측 트리에서 항목을 클릭하면 상세가 여기에 표시됩니다.</p>
+      <div id="detail-inner"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+let versionEl = document.getElementById('version');
+let swBox = document.getElementById('sw-box');
+let treeEl = document.getElementById('tree');
+let searchEl = document.getElementById('q');
+let expandBtn = document.getElementById('expand');
+let collapseBtn = document.getElementById('collapse');
+let exportBtn = document.getElementById('export');
+
+function selectedSW() {
+  return Array.from(swBox.querySelectorAll('.pill.active')).map(p => p.dataset.id);
+}
+swBox.addEventListener('click', e=>{
+  let t = e.target.closest('.pill');
+  if (!t) return;
+  t.classList.toggle('active');
+  loadTree();
+});
+searchEl.addEventListener('input', debounce(loadTree, 300));
+versionEl.addEventListener('change', loadTree);
+expandBtn.addEventListener('click', ()=>treeEl.querySelectorAll('ul').forEach(u=>u.style.display='block'));
+collapseBtn.addEventListener('click', ()=>treeEl.querySelectorAll('ul').forEach(u=>u.style.display='none'));
+
+exportBtn.addEventListener('click', async ()=>{
+  let sw = selectedSW();
+  if (!sw.length) return alert('SW를 선택해주세요');
+  let fd = new FormData();
+  fd.append('version_id', versionEl.value);
+  fd.append('sw_ids', sw.join(','));
+  fd.append('cover_title', '메뉴얼');
+  const res = await fetch('/manuals/export/pdf', { method:'POST', body: fd });
+  if (!res.ok) return alert('내보내기 실패');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='manual.pdf'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+async function loadTree() {
+  let sw = selectedSW();
+  let q = searchEl.value || '';
+  if (!sw.length) { treeEl.innerHTML='<p class="muted">좌측에서 SW를 하나 이상 선택하세요.</p>'; return; }
+  let url = `/manuals/api/tree?version_id=${versionEl.value}&` + sw.map(s=>`sw_ids=${s}`).join('&') + (q?`&q=${encodeURIComponent(q)}`:'');
+  const res = await fetch(url);
+  const data = await res.json();
+  renderTree(data.tree, treeEl);
+}
+function renderTree(tree, el) {
+  el.innerHTML = '';
+  const ul = document.createElement('ul');
+  el.appendChild(ul);
+  tree.forEach(n => ul.appendChild(renderNode(n)));
+}
+function renderNode(n) {
+  const li = document.createElement('li');
+  const row = document.createElement('div');
+  row.className = 'node-row' + (n.highlight ? ' hit' : '');
+  const tri = document.createElement('span');
+  tri.className='tri';
+  tri.textContent = n.children?.length ? '▸' : '';
+  const cb = document.createElement('input');
+  cb.type='checkbox';
+  cb.indeterminate = (n.state==='partial');
+  cb.checked = (n.state==='checked');
+  const label = document.createElement('span');
+  label.textContent = n.title;
+  label.style.cursor='pointer';
+  row.appendChild(tri); row.appendChild(cb); row.appendChild(label);
+  li.appendChild(row);
+  const kids = document.createElement('ul'); kids.style.display='none';
+  li.appendChild(kids);
+
+  if (n.children?.length) {
+    tri.addEventListener('click', ()=>{ kids.style.display = (kids.style.display==='none'?'block':'none'); tri.textContent = kids.style.display==='none' ? '▸':'▾'; });
+    n.children.forEach(c => kids.appendChild(renderNode(c)));
+  }
+
+  // 클릭 시 상세
+  label.addEventListener('click', ()=>showDetail(n));
+
+  // 체크 → 서버 반영(부모-자식 전파)
+  cb.addEventListener('change', async ()=>{
+    let sw = selectedSW();
+    let fd = new FormData();
+    fd.append('version_id', versionEl.value);
+    fd.append('sw_ids', sw.join(','));
+    fd.append('node_id', n.id);
+    fd.append('checked', cb.checked ? 'true' : 'false');
+    const res = await fetch('/manuals/api/check', { method:'POST', body: fd });
+    if(!res.ok) { alert('저장 실패'); return; }
+    loadTree(); // 최신 3-state 반영
+  });
+  return li;
+}
+async function showDetail(n) {
+  const wrap = document.getElementById('detail-inner');
+  wrap.innerHTML = `
+    <h3>${n.title}</h3>
+    <form id="upform">
+      <div style="margin:8px 0;">
+        <label>첨부 업로드(PDF/Word/이미지)</label>
+        <input type="file" name="file" />
+      </div>
+      <div style="display:flex; gap:8px;">
+        <select name="software_id" id="softSel"></select>
+        <button class="btn">업로드</button>
+      </div>
+    </form>
+  `;
+  // 현재 선택 SW만 선택지로
+  let softSel = wrap.querySelector('#softSel');
+  for (let s of selectedSW()) {
+    const opt = document.createElement('option');
+    const pill = document.querySelector(`.pill[data-id="${s}"]`);
+    opt.value=s; opt.textContent=pill?.textContent || s; softSel.appendChild(opt);
+  }
+  wrap.querySelector('#upform').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    let fd = new FormData(e.target);
+    fd.append('version_id', versionEl.value);
+    fd.append('node_id', n.id);
+    const res = await fetch('/manuals/api/upload', { method:'POST', body: fd });
+    if (!res.ok) return alert('업로드 실패');
+    alert('업로드 완료');
+  });
+}
+function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); } }
+</script>
+</body>
+</html>

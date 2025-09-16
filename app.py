@@ -18,6 +18,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session as OrmSession
 from fastapi.templating import Jinja2Templates
 import io, csv
+from app_manuals import router as manuals_router
+from auth_utils import require_master, require_tech, require_login
 
 
 # ------------------------------------------------------------------------------
@@ -35,6 +37,7 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 app = FastAPI()
+app.include_router(manuals_router)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
@@ -43,6 +46,7 @@ app.add_middleware(
     https_only=False,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 # ★ 숫자 천단위 콤마 필터(포맷 정책 바꾸려면 여기 수정)
@@ -57,59 +61,6 @@ def _comma(v):
         except Exception:
             return str(v)
 templates.env.filters["comma"] = _comma
-
-# ------------------------------------------------------------------------------
-#// 권한 헬퍼 (세션 roles 사용)
-# ------------------------------------------------------------------------------
-# --------------------------------------------------------------------------
-#// 권한 헬퍼 (세션 roles 사용) — 단일 정의로 정리 (MASTER는 TECH 가드 통과)
-# --------------------------------------------------------------------------
-from typing import List
-
-def current_roles(request: Request):
-    return (request.session.get("user") or {}).get("roles", []) or []
-
-def has_role(request: Request, *codes: str) -> bool:
-    roles = set(r.upper() for r in current_roles(request))
-    return any((c or "").upper() in roles for c in codes)
-
-def require_login(request: Request):
-    if "user" not in request.session:
-        raise HTTPException(status_code=401, detail="Login required")
-
-def require_role_any(request: Request, *codes: str):
-    require_login(request)
-    if not has_role(request, *codes):
-        raise HTTPException(status_code=403, detail="권한이 없습니다.")
-
-def require_master(request: Request):
-    require_role_any(request, "MASTER")
-
-def require_tech(request: Request):
-    # ★ MASTER도 허용
-    require_role_any(request, "TECH", "MASTER")
-
-def csv_response(filename: str, headers, rows):
-    # 헤더 라벨 뽑기
-    def hlabel(h):
-        if isinstance(h, dict):  return h.get("label", "")
-        if isinstance(h, tuple): return h[0]
-        return str(h)
-    labels = [hlabel(h) for h in headers]
-
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(labels)
-    for r in rows:
-        w.writerow([("" if v is None else v) for v in r])
-
-    data = buf.getvalue().encode("utf-8-sig")  # 엑셀 호환 BOM
-    return Response(
-        content=data,
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
-
 
 # ------------------------------------------------------------------------------
 #// DB 초기화 (SQLite FK 강제)

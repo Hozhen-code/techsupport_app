@@ -33,6 +33,7 @@
       {% set roles = user.get('roles', []) %}
       {% set is_master = 'MASTER' in roles %}
       {% set is_tech   = 'TECH' in roles %}
+      {% set is_lab    = 'LAB' in roles %}
 
       <!-- 로고(이미지 실패 시 텍스트 노출) -->
       <a href="/calendar" class="brand-link" aria-label="NAIZ 홈으로">
@@ -59,6 +60,11 @@
       <a href="/vendors"        class="{% if p.startswith('/vendors') %}active{% endif %}">협력사</a>
       <a href="/sw_products"    class="{% if p.startswith('/sw_products') %}active{% endif %}">SW</a>
       <a href="/sw_services"    class="{% if p.startswith('/sw_services') %}active{% endif %}">서비스</a>
+      
+      {% if is_master or is_tech or is_lab %}
+        <a href="/manuals" class="{% if p.startswith('/manuals') %}active{% endif %}">메뉴얼</a>
+      {% endif %}
+
       <a href="/logout">로그아웃</a>
     </div>
   </header>
