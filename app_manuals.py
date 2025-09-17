@@ -1,12 +1,10 @@
 # app_manuals.py
-from fastapi import (
-    APIRouter, Depends, Request, UploadFile, File, Form, HTTPException, Query
-)
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import (
-    Column, Integer, String, Text, ForeignKey, DateTime, Boolean,
-    func, UniqueConstraint, create_engine
+    Column, Integer, String, Text, ForeignKey, DateTime, Boolean, func,
+    UniqueConstraint, create_engine
 )
 from sqlalchemy.orm import relationship, Session, declarative_base, sessionmaker
 from typing import List, Optional, Dict, Any
@@ -16,9 +14,14 @@ from datetime import datetime
 from auth_utils import require_master, require_tech, require_login
 from types import SimpleNamespace
 
-# ── DB/세션 생성 ───────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# DB/세션 (app.py import 금지: 순환참조 방지)
+# ──────────────────────────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./naiz.db")
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def get_db():
@@ -36,30 +39,9 @@ router = APIRouter(prefix="/manuals", tags=["manuals"])
 UPLOAD_ROOT = Path("uploads/manuals")
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
-# 역할 상수
-class Role(str, enum.Enum):
-    master = "MASTER"
-    tech = "TECH"
-    lab = "LAB"
-
-# 권한 의존성
-def current_user_dep(request: Request):
-    require_login(request)
-    u = request.session.get("user") or {}
-    return SimpleNamespace(
-        id=u.get("id") or u.get("emp_id") or 0,
-        login_id=u.get("login_id"),
-        roles=u.get("roles", []),
-        name=u.get("name"),
-    )
-
-def dep_master(request: Request, user=Depends(current_user_dep)):
-    require_master(request); return user
-
-def dep_tech(request: Request, user=Depends(current_user_dep)):
-    require_tech(request); return user
-
-# ── 스키마 ───────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# 모델
+# ──────────────────────────────────────────────────────────────────────────────
 class Version(Base):
     __tablename__ = "versions"
     id = Column(Integer, primary_key=True)
@@ -79,7 +61,6 @@ class ManualNode(Base):
     parent_id = Column(Integer, ForeignKey("manual_nodes.id"), nullable=True)
     sort_order = Column(Integer, default=0)
     is_section = Column(Boolean, default=True)
-
     parent = relationship("ManualNode", remote_side=[id], backref="children", lazy="joined")
 
 class ManualNodeRevision(Base):
@@ -90,16 +71,12 @@ class ManualNodeRevision(Base):
     version_id = Column(Integer, ForeignKey("versions.id"), index=True, nullable=False)
     checked = Column(Boolean, default=False)
     summary = Column(Text, nullable=True)
-    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by = Column(Integer, nullable=True)  # users 테이블 없을 수 있어 FK 제거
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-
     node = relationship("ManualNode", lazy="joined")
     software = relationship("Software", lazy="joined")
     version = relationship("Version", lazy="joined")
-
-    __table_args__ = (
-        UniqueConstraint("node_id", "software_id", "version_id", name="uniq_node_sw_ver"),
-    )
+    __table_args__ = (UniqueConstraint("node_id", "software_id", "version_id", name="uniq_node_sw_ver"),)
 
 class Attachment(Base):
     __tablename__ = "attachments"
@@ -110,34 +87,48 @@ class Attachment(Base):
     mime = Column(String, nullable=True)
     size = Column(Integer, nullable=True)
     uploaded_at = Column(DateTime, default=func.now())
-
     revision = relationship("ManualNodeRevision", backref="attachments", lazy="joined")
 
 class ChangeLog(Base):
     __tablename__ = "manual_changelog"
     id = Column(Integer, primary_key=True)
-    node_id = Column(Integer, ForeignKey("manual_nodes.id"), index=True)
-    software_id = Column(Integer, ForeignKey("software.id"), index=True)
-    version_id = Column(Integer, ForeignKey("versions.id"), index=True)
-    changed_by = Column(Integer, ForeignKey("users.id"))
+    node_id = Column(Integer, index=True)
+    software_id = Column(Integer, index=True)
+    version_id = Column(Integer, index=True)
+    changed_by = Column(Integer, nullable=True)
     change_note = Column(Text)
     changed_at = Column(DateTime, default=func.now())
 
+# 스키마 생성(존재하면 no-op)
 Base.metadata.create_all(bind=engine)
 
-# ── 유틸 ───────────────────────────────────────────────
-def tri_state(checked_children: List[bool]) -> str:
-    if not checked_children:
-        return "unchecked"
-    if all(checked_children):
-        return "checked"
-    if any(checked_children):
-        return "partial"
-    return "unchecked"
+# ──────────────────────────────────────────────────────────────────────────────
+# 권한/현재 사용자
+# ──────────────────────────────────────────────────────────────────────────────
+def current_user_dep(request: Request):
+    require_login(request)
+    u = request.session.get("user") or {}
+    return SimpleNamespace(
+        id=u.get("emp_id") or u.get("id") or 0,
+        login_id=u.get("login_id"),
+        roles=u.get("roles", []),
+        name=u.get("name"),
+    )
 
-# ── 페이지 ─────────────────────────────────────────────
+def dep_master(request: Request, user=Depends(current_user_dep)):
+    require_master(request)
+    return user
+
+def dep_tech(request: Request, user=Depends(current_user_dep)):
+    require_tech(request)
+    return user
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 페이지
+# ──────────────────────────────────────────────────────────────────────────────
 @router.get("/", response_class=HTMLResponse, name="manuals_page")
 def manuals_page(request: Request, db: Session = Depends(get_db)):
+    require_login(request)
     versions = db.query(Version).order_by(Version.created_at.desc()).all()
     sw = db.query(Software).order_by(Software.name).all()
     return templates.TemplateResponse(
@@ -145,7 +136,7 @@ def manuals_page(request: Request, db: Session = Depends(get_db)):
         {"request": request, "versions": versions, "software": sw},
     )
 
-# ── 드롭다운 API ───────────────────────────────────────
+# 드롭다운 데이터
 @router.get("/api/versions")
 def api_versions(db: Session = Depends(get_db)):
     rows = db.query(Version).order_by(Version.created_at.desc()).all()
@@ -156,25 +147,61 @@ def api_software(db: Session = Depends(get_db)):
     rows = db.query(Software).order_by(Software.name).all()
     return [{"id": r.id, "name": r.name} for r in rows]
 
-# ── 트리 조회 ──────────────────────────────────────────
-@router.get("/api/tree")
-def api_tree(
-    version_id: int,
-    sw_ids: List[int] = Query(..., description="SW ID 리스트"),
-    q: Optional[str] = None,
+# ──────────────────────────────────────────────────────────────────────────────
+# 트리 조회 (GET/POST 모두 허용)  ← 405 해결 포인트
+# ──────────────────────────────────────────────────────────────────────────────
+def _tri_state(checked_children: List[bool]) -> str:
+    if not checked_children:
+        return "unchecked"
+    if all(checked_children):
+        return "checked"
+    if any(checked_children):
+        return "partial"
+    return "unchecked"
+
+@router.api_route("/api/tree", methods=["GET", "POST"])
+async def api_tree(
+    request: Request,
     db: Session = Depends(get_db),
+    # GET 쿼리 기본값
+    version_id: Optional[int] = Query(None),
+    sw_ids: Optional[List[int]] = Query(None),
+    q: Optional[str] = Query(None),
 ):
-    all_nodes = db.query(ManualNode).all()
+    require_login(request)
+
+    # POST 폼 지원
+    if request.method == "POST":
+        form = await request.form()
+        if version_id is None and "version_id" in form:
+            version_id = int(form.get("version_id"))
+        # sw_ids는 "1,2,3" 또는 다중키로 올 수 있음
+        if (not sw_ids) and ("sw_ids" in form):
+            # Starlette FormData는 getlist 지원
+            raw_list = form.getlist("sw_ids")
+            if len(raw_list) == 1 and ("," in raw_list[0]):
+                sw_ids = [int(x) for x in raw_list[0].split(",") if x]
+            else:
+                sw_ids = [int(x) for x in raw_list if x]
+        if q is None:
+            q = form.get("q")
+
+    if not version_id or not sw_ids:
+        return {"tree": []}
+
+    all_nodes: List[ManualNode] = db.query(ManualNode).all()
 
     revs = db.query(ManualNodeRevision).filter(
         ManualNodeRevision.version_id == version_id,
         ManualNodeRevision.software_id.in_(sw_ids),
     ).all()
 
+    # node_id -> (해당 SW들 중 하나라도 checked면 True)
     checked_map: Dict[int, bool] = {}
     for r in revs:
         checked_map[r.node_id] = checked_map.get(r.node_id, False) or bool(r.checked)
 
+    # 검색: 매치 노드와 조상은 무조건 표시되도록 id 수집
     match_ids = set()
     if q:
         ql = q.lower()
@@ -187,18 +214,20 @@ def api_tree(
                     p = p.parent
 
     def serialize(n: ManualNode) -> Dict[str, Any]:
-        kids = [serialize(c) for c in sorted(n.children, key=lambda x: (c.sort_order, c.id))]
+        kids = [serialize(c) for c in sorted(n.children, key=lambda x: (x.sort_order, x.id))]
         states = [k["state"] for k in kids]
         child_checked_flags = [s == "checked" for s in states]
         node_checked = checked_map.get(n.id, False)
+
         if not kids:
             state = "checked" if node_checked else "unchecked"
         else:
             if node_checked and all(child_checked_flags):
                 state = "checked"
             else:
-                _ts = tri_state(child_checked_flags or [node_checked])
-                state = "partial" if (node_checked and _ts == "unchecked") else _ts
+                ts = _tri_state(child_checked_flags or [node_checked])
+                state = "partial" if (node_checked and ts == "unchecked") else ts
+
         return {
             "id": n.id,
             "title": n.title,
@@ -213,17 +242,20 @@ def api_tree(
     tree = [serialize(r) for r in roots]
     return {"tree": tree}
 
-# ── 체크 저장 ─────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# 체크/해제 저장(부모-자식 전파)
+# ──────────────────────────────────────────────────────────────────────────────
 @router.post("/api/check")
 def api_check(
     request: Request,
     version_id: int = Form(...),
-    sw_ids: str = Form(...),  # "1,2,3"
+    sw_ids: str = Form(...),      # "1,2,3"
     node_id: int = Form(...),
     checked: bool = Form(...),
     db: Session = Depends(get_db),
-    actor: Any = Depends(dep_tech),
+    actor: Any = Depends(dep_tech),  # TECH 이상
 ):
+    require_login(request)
     sw_list = [int(x) for x in sw_ids.split(",") if x]
 
     queue: List[int] = []
@@ -258,9 +290,12 @@ def api_check(
     db.commit()
     return {"ok": True}
 
-# ── 첨부 업로드 ───────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# 첨부 업로드
+# ──────────────────────────────────────────────────────────────────────────────
 @router.post("/api/upload")
 def api_upload(
+    request: Request,
     version_id: int = Form(...),
     software_id: int = Form(...),
     node_id: int = Form(...),
@@ -268,6 +303,7 @@ def api_upload(
     db: Session = Depends(get_db),
     user: Any = Depends(dep_tech),
 ):
+    require_login(request)
     changer_id = getattr(user, "id", None)
 
     rev = db.query(ManualNodeRevision).filter_by(
@@ -278,7 +314,8 @@ def api_upload(
             node_id=node_id, software_id=software_id, version_id=version_id,
             checked=False, updated_by=changer_id
         )
-        db.add(rev); db.flush()
+        db.add(rev)
+        db.flush()
 
     node_dir = UPLOAD_ROOT / f"v{version_id}_sw{software_id}" / str(node_id)
     node_dir.mkdir(parents=True, exist_ok=True)
@@ -304,7 +341,9 @@ def api_upload(
     db.commit()
     return {"ok": True, "attachment_id": att.id}
 
-# ── PDF 내보내기 ───────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# PDF 내보내기(체크 항목만)
+# ──────────────────────────────────────────────────────────────────────────────
 @router.post("/export/pdf")
 def export_pdf(
     request: Request,
@@ -313,12 +352,17 @@ def export_pdf(
     cover_title: str = Form("메뉴얼"),
     db: Session = Depends(get_db),
 ):
+    require_login(request)
     try:
-        from weasyprint import HTML, CSS
+        from weasyprint import HTML  # 함수 내부 임포트
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=("WeasyPrint 실행 환경 필요. " f"원인: {e}")
+            detail=(
+                "WeasyPrint(HTML→PDF) 의존성이 설치되지 않았습니다. "
+                "Windows에선 GTK/Pango/Cairo 구성 또는 WSL/도커 환경을 사용하세요. "
+                f"원인: {e}"
+            ),
         )
 
     sw_list = [int(x) for x in sw_ids.split(",") if x]
@@ -362,7 +406,9 @@ def export_pdf(
     toc_html = f"""
     <section class="toc">
         <h2>목차</h2>
-        <ol>{''.join(toc_items)}</ol>
+        <ol>
+            {''.join(toc_items)}
+        </ol>
     </section>
     <div class="pagebreak"></div>
     """
@@ -390,7 +436,7 @@ def export_pdf(
     <meta charset="utf-8" />
     <style>
     @page {{ size: A4; margin: 20mm; }}
-    body {{ font-family: "Noto Sans CJK KR", sans-serif; }}
+    body {{ font-family: "Noto Sans CJK KR", "Malgun Gothic", sans-serif; }}
     h1,h2,h3 {{ margin: 0 0 12px 0; }}
     .cover {{ text-align:center; padding-top: 120px; }}
     .toc ol {{ padding-left: 20px; }}
@@ -412,9 +458,12 @@ def export_pdf(
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
-# ── 대량 업로드 ───────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# 다중 업로드
+# ──────────────────────────────────────────────────────────────────────────────
 @router.post("/api/bulk-import")
 def bulk_import(
+    request: Request,
     version_id: int = Form(...),
     software_id: int = Form(...),
     node_id: int = Form(...),
@@ -422,6 +471,7 @@ def bulk_import(
     db: Session = Depends(get_db),
     user: Any = Depends(dep_tech),
 ):
+    require_login(request)
     changer_id = getattr(user, "id", None)
 
     rev = db.query(ManualNodeRevision).filter_by(
@@ -432,7 +482,8 @@ def bulk_import(
             node_id=node_id, software_id=software_id, version_id=version_id,
             checked=False, updated_by=changer_id
         )
-        db.add(rev); db.flush()
+        db.add(rev)
+        db.flush()
 
     node_dir = UPLOAD_ROOT / f"v{version_id}_sw{software_id}" / str(node_id)
     node_dir.mkdir(parents=True, exist_ok=True)
