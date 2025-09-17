@@ -1,5 +1,6 @@
-ALTER TABLE cs_requests  ADD COLUMN deleted_at TEXT;
-ALTER TABLE cs_requests  ADD COLUMN deleted_by INTEGER;
+-- revisions 클린업
+DELETE FROM manual_node_revisions;
 
-ALTER TABLE cs_schedules ADD COLUMN deleted_at TEXT;
-ALTER TABLE cs_schedules ADD COLUMN deleted_by INTEGER;
+-- 새로 추가된 노드 모두에 대해 revision 생성
+INSERT INTO manual_node_revisions (node_id, software_id, version_id, checked)
+SELECT id, 2, 1, 0 FROM manual_nodes;

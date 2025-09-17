@@ -1,9 +1,12 @@
 # app_manuals.py
-from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, HTTPException
+from fastapi import (
+    APIRouter, Depends, Request, UploadFile, File, Form, HTTPException, Query
+)
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import (
-    Column, Integer, String, Text, ForeignKey, DateTime, Boolean, func, UniqueConstraint, create_engine
+    Column, Integer, String, Text, ForeignKey, DateTime, Boolean,
+    func, UniqueConstraint, create_engine
 )
 from sqlalchemy.orm import relationship, Session, declarative_base, sessionmaker
 from typing import List, Optional, Dict, Any
@@ -13,7 +16,7 @@ from datetime import datetime
 from auth_utils import require_master, require_tech, require_login
 from types import SimpleNamespace
 
-# ── DB/세션 생성 (환경변수 우선) ───────────────────────────────────────────────
+# ── DB/세션 생성 ───────────────────────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./naiz.db")
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -26,7 +29,6 @@ def get_db():
         db.close()
 
 templates = Jinja2Templates(directory="templates")
-
 Base = declarative_base()
 router = APIRouter(prefix="/manuals", tags=["manuals"])
 
@@ -40,11 +42,10 @@ class Role(str, enum.Enum):
     tech = "TECH"
     lab = "LAB"
 
-# 권한 의존성: 현재 로그인 사용자를 SimpleNamespace로 반환
+# 권한 의존성
 def current_user_dep(request: Request):
     require_login(request)
     u = request.session.get("user") or {}
-    # 세션 구조에 맞게 수정 (emp_id, id 등 네가 쓰는 키)
     return SimpleNamespace(
         id=u.get("id") or u.get("emp_id") or 0,
         login_id=u.get("login_id"),
@@ -53,14 +54,12 @@ def current_user_dep(request: Request):
     )
 
 def dep_master(request: Request, user=Depends(current_user_dep)):
-    require_master(request)
-    return user
+    require_master(request); return user
 
 def dep_tech(request: Request, user=Depends(current_user_dep)):
-    require_tech(request)
-    return user
+    require_tech(request); return user
 
-# ── 스키마 ────────────────────────────────────────────────────────────────────
+# ── 스키마 ───────────────────────────────────────────────
 class Version(Base):
     __tablename__ = "versions"
     id = Column(Integer, primary_key=True)
@@ -124,10 +123,9 @@ class ChangeLog(Base):
     change_note = Column(Text)
     changed_at = Column(DateTime, default=func.now())
 
-# 스키마 생성(존재 시 no-op)
 Base.metadata.create_all(bind=engine)
 
-# ── 유틸 ──────────────────────────────────────────────────────────────────────
+# ── 유틸 ───────────────────────────────────────────────
 def tri_state(checked_children: List[bool]) -> str:
     if not checked_children:
         return "unchecked"
@@ -137,7 +135,7 @@ def tri_state(checked_children: List[bool]) -> str:
         return "partial"
     return "unchecked"
 
-# ── 페이지(목록 화면) ─────────────────────────────────────────────────────────
+# ── 페이지 ─────────────────────────────────────────────
 @router.get("/", response_class=HTMLResponse, name="manuals_page")
 def manuals_page(request: Request, db: Session = Depends(get_db)):
     versions = db.query(Version).order_by(Version.created_at.desc()).all()
@@ -147,7 +145,7 @@ def manuals_page(request: Request, db: Session = Depends(get_db)):
         {"request": request, "versions": versions, "software": sw},
     )
 
-# ── 드롭다운 데이터 ────────────────────────────────────────────────────────────
+# ── 드롭다운 API ───────────────────────────────────────
 @router.get("/api/versions")
 def api_versions(db: Session = Depends(get_db)):
     rows = db.query(Version).order_by(Version.created_at.desc()).all()
@@ -158,9 +156,14 @@ def api_software(db: Session = Depends(get_db)):
     rows = db.query(Software).order_by(Software.name).all()
     return [{"id": r.id, "name": r.name} for r in rows]
 
-# ── 트리 조회(검색/3-state 계산) ───────────────────────────────────────────────
+# ── 트리 조회 ──────────────────────────────────────────
 @router.get("/api/tree")
-def api_tree(version_id: int, sw_ids: List[int], q: Optional[str] = None, db: Session = Depends(get_db)):
+def api_tree(
+    version_id: int,
+    sw_ids: List[int] = Query(..., description="SW ID 리스트"),
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     all_nodes = db.query(ManualNode).all()
 
     revs = db.query(ManualNodeRevision).filter(
@@ -184,7 +187,7 @@ def api_tree(version_id: int, sw_ids: List[int], q: Optional[str] = None, db: Se
                     p = p.parent
 
     def serialize(n: ManualNode) -> Dict[str, Any]:
-        kids = [serialize(c) for c in sorted(n.children, key=lambda x: (x.sort_order, x.id))]
+        kids = [serialize(c) for c in sorted(n.children, key=lambda x: (c.sort_order, c.id))]
         states = [k["state"] for k in kids]
         child_checked_flags = [s == "checked" for s in states]
         node_checked = checked_map.get(n.id, False)
@@ -210,27 +213,24 @@ def api_tree(version_id: int, sw_ids: List[int], q: Optional[str] = None, db: Se
     tree = [serialize(r) for r in roots]
     return {"tree": tree}
 
-# ── 체크/해제 저장(부모-자식 전파) ─────────────────────────────────────────────
+# ── 체크 저장 ─────────────────────────────────────────
 @router.post("/api/check")
 def api_check(
     request: Request,
     version_id: int = Form(...),
-    sw_ids: str = Form(...),      # "1,2,3"
+    sw_ids: str = Form(...),  # "1,2,3"
     node_id: int = Form(...),
     checked: bool = Form(...),
     db: Session = Depends(get_db),
-    actor: Any = Depends(dep_tech),  # TECH 이상
+    actor: Any = Depends(dep_tech),
 ):
     sw_list = [int(x) for x in sw_ids.split(",") if x]
 
-    # 대상 노드 + 모든 자식 수집
     queue: List[int] = []
-
     def collect(nid: int):
         queue.append(nid)
         for c in db.query(ManualNode).filter(ManualNode.parent_id == nid).all():
             collect(c.id)
-
     collect(node_id)
 
     changer_id = getattr(actor, "id", None)
@@ -258,7 +258,7 @@ def api_check(
     db.commit()
     return {"ok": True}
 
-# ── 첨부 업로드 ────────────────────────────────────────────────────────────────
+# ── 첨부 업로드 ───────────────────────────────────────
 @router.post("/api/upload")
 def api_upload(
     version_id: int = Form(...),
@@ -266,7 +266,7 @@ def api_upload(
     node_id: int = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: Any = Depends(dep_tech),   # TECH 또는 MASTER
+    user: Any = Depends(dep_tech),
 ):
     changer_id = getattr(user, "id", None)
 
@@ -278,8 +278,7 @@ def api_upload(
             node_id=node_id, software_id=software_id, version_id=version_id,
             checked=False, updated_by=changer_id
         )
-        db.add(rev)
-        db.flush()
+        db.add(rev); db.flush()
 
     node_dir = UPLOAD_ROOT / f"v{version_id}_sw{software_id}" / str(node_id)
     node_dir.mkdir(parents=True, exist_ok=True)
@@ -305,9 +304,7 @@ def api_upload(
     db.commit()
     return {"ok": True, "attachment_id": att.id}
 
-
-# ── PDF 내보내기(체크된 항목만 요약) ───────────────────────────────────────────
-
+# ── PDF 내보내기 ───────────────────────────────────────
 @router.post("/export/pdf")
 def export_pdf(
     request: Request,
@@ -317,19 +314,13 @@ def export_pdf(
     db: Session = Depends(get_db),
 ):
     try:
-        from weasyprint import HTML, CSS  # ← 함수 내부 임포트(중요)
+        from weasyprint import HTML, CSS
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=(
-                "WeasyPrint(HTML→PDF) 실행 환경이 갖춰지지 않았습니다. "
-                "Windows에선 GTK/Pango/Cairo 설치가 필요합니다. "
-                "PDF 외 기능은 정상 동작합니다. "
-                "대안: WSL/도커에서 실행하거나 wkhtmltopdf 사용. "
-                f"원인: {e}"
-            ),
+            detail=("WeasyPrint 실행 환경 필요. " f"원인: {e}")
         )
-    
+
     sw_list = [int(x) for x in sw_ids.split(",") if x]
     version = db.query(Version).get(version_id)
     sw_names = [s.name for s in db.query(Software).filter(Software.id.in_(sw_list)).all()]
@@ -371,9 +362,7 @@ def export_pdf(
     toc_html = f"""
     <section class="toc">
         <h2>목차</h2>
-        <ol>
-            {''.join(toc_items)}
-        </ol>
+        <ol>{''.join(toc_items)}</ol>
     </section>
     <div class="pagebreak"></div>
     """
@@ -401,7 +390,7 @@ def export_pdf(
     <meta charset="utf-8" />
     <style>
     @page {{ size: A4; margin: 20mm; }}
-    body {{ font-family: "Noto Sans CJK KR", "Malgun Gothic", sans-serif; }}
+    body {{ font-family: "Noto Sans CJK KR", sans-serif; }}
     h1,h2,h3 {{ margin: 0 0 12px 0; }}
     .cover {{ text-align:center; padding-top: 120px; }}
     .toc ol {{ padding-left: 20px; }}
@@ -423,7 +412,7 @@ def export_pdf(
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
-# ── 대량 업로드(편의) ──────────────────────────────────────────────────────────
+# ── 대량 업로드 ───────────────────────────────────────
 @router.post("/api/bulk-import")
 def bulk_import(
     version_id: int = Form(...),
@@ -431,11 +420,10 @@ def bulk_import(
     node_id: int = Form(...),
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    user: Any = Depends(dep_tech),   # TECH 또는 MASTER
+    user: Any = Depends(dep_tech),
 ):
     changer_id = getattr(user, "id", None)
 
-    # 공통: 해당 노드/소프트웨어/버전의 리비전 확보
     rev = db.query(ManualNodeRevision).filter_by(
         node_id=node_id, software_id=software_id, version_id=version_id
     ).first()
@@ -444,8 +432,7 @@ def bulk_import(
             node_id=node_id, software_id=software_id, version_id=version_id,
             checked=False, updated_by=changer_id
         )
-        db.add(rev)
-        db.flush()
+        db.add(rev); db.flush()
 
     node_dir = UPLOAD_ROOT / f"v{version_id}_sw{software_id}" / str(node_id)
     node_dir.mkdir(parents=True, exist_ok=True)

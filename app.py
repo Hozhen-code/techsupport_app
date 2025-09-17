@@ -2,7 +2,7 @@
 import os
 import json
 from datetime import date, datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Iterable
 import hashlib, hmac, secrets, string
 from passlib.hash import bcrypt, argon2
 from urllib.parse import quote
@@ -173,7 +173,15 @@ def active_only(q, Model):
     if hasattr(Model, "deleted_at"):
         return q.filter(getattr(Model, "deleted_at").is_(None))
     return q
+# ------------------------------------------------------------------------------
+#// 권한 헬퍼
+# ------------------------------------------------------------------------------
+def current_roles(request: Request) -> list[str]:
+    return (request.session.get("user") or {}).get("roles", []) or []
 
+def has_role(request: Request, *codes: Iterable[str]) -> bool:
+    roles = set((r or "").upper() for r in current_roles(request))
+    return any(((c or "").upper() in roles) for c in codes)
 # ------------------------------------------------------------------------------
 #// 모델 (최신 DDL 반영)
 # ------------------------------------------------------------------------------
