@@ -1,0 +1,17 @@
+services:
+  app:
+    image: techsupport-app
+    build: .
+    container_name: techsupport_app
+    ports:
+      - "8000:8000"
+    environment:
+      # 컨테이너 내부 절대경로를 명시 (앱 기본값과 일치)
+      - DATABASE_URL=sqlite:////app/data/naiz.db
+    volumes:
+      # 소스 코드 핫리로드
+      - .:/app
+      # DB 파일만 안전하게 바인드 (윈도우 경로 → 컨테이너 내부 경로)
+      - ./data:/app/data
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 8000 --reload

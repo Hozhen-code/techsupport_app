@@ -3,7 +3,6 @@
 
 {% block content %}
 <style>
-  /* 페이지 전용(다른 화면과 충돌 방지) */
   #manuals .layout{display:grid;grid-template-columns:260px 1fr;gap:16px}
   #manuals .left{background:#f5f7fb;padding:12px;overflow:auto;border-radius:8px}
   #manuals .right{padding:12px;overflow:auto}
@@ -78,10 +77,15 @@
   const collapseBtn = document.getElementById('collapse');
   const exportBtn = document.getElementById('export');
 
-  // SW pill 클릭 토글
+  // 펼침 상태 저장용
+  let expandedIds = new Set();
+  let lastTree = [];
+
   function selectedSW(){
     return Array.from(swBox.querySelectorAll('.pill.active')).map(p=>p.dataset.id);
   }
+
+  // pill 토글
   swBox.addEventListener('click', (e)=>{
     const t = e.target.closest('.pill'); if(!t) return;
     t.classList.toggle('active'); loadTree();
@@ -91,9 +95,18 @@
   searchEl.addEventListener('input', debounce(loadTree, 300));
   versionEl.addEventListener('change', loadTree);
 
-  // 접기/펼치기
-  expandBtn.addEventListener('click', ()=>treeEl.querySelectorAll('ul').forEach(u=>u.style.display='block'));
-  collapseBtn.addEventListener('click', ()=>treeEl.querySelectorAll('ul').forEach(u=>u.style.display='none'));
+  // 펼치기/접기
+  expandBtn.addEventListener('click', ()=>{
+    // 현재 트리의 모든 id를 expandedIds에 넣고 DOM도 펼침
+    getAllIds(lastTree).forEach(id=>expandedIds.add(id));
+    treeEl.querySelectorAll('ul').forEach(u=>u.style.display='block');
+    treeEl.querySelectorAll('.tri').forEach(t=>t.textContent = '▾');
+  });
+  collapseBtn.addEventListener('click', ()=>{
+    expandedIds.clear();
+    treeEl.querySelectorAll('ul').forEach(u=>u.style.display='none');
+    treeEl.querySelectorAll('.tri').forEach(t=>t.textContent = '▸');
+  });
 
   // PDF
   exportBtn.addEventListener('click', async ()=>{
@@ -111,28 +124,44 @@
     URL.revokeObjectURL(url);
   });
 
+  // 현재 DOM에서 펼쳐진 li id를 expandedIds에 반영
+  function snapshotExpanded(){
+    treeEl.querySelectorAll('li[data-id] > ul').forEach(ul=>{
+      const id = Number(ul.parentElement.dataset.id);
+      if(ul.style.display !== 'none') expandedIds.add(id);
+      else expandedIds.delete(id);
+    });
+  }
+
   // 트리 로드
   async function loadTree(){
-  const sw = selectedSW();
-  const q  = searchEl.value || '';
-  if(!sw.length){
-    treeEl.innerHTML = '<p class="muted">좌측에서 SW를 하나 이상 선택하세요.</p>';
-    return;
-  }
-  const res = await fetch('/manuals/api/tree', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      version_id: Number(versionEl.value),
-      sw_ids: sw.map(Number),
-      q
-    })
-  });
-  if(!res.ok){
-    const t = await res.text(); alert('트리 로드 실패\n' + t); return;
-  }
-  const data = await res.json();
-  renderTree(data.tree);
+    const sw = selectedSW();
+    const q = searchEl.value || '';
+
+    if(!sw.length){
+      treeEl.innerHTML = '<p class="muted">좌측에서 SW를 하나 이상 선택하세요.</p>';
+      lastTree = [];
+      return;
+    }
+
+    // 리로드 전에 펼침 상태 스냅샷
+    snapshotExpanded();
+
+    const fd = new FormData();
+    fd.append('version_id', versionEl.value);
+    sw.forEach(s => fd.append('sw_ids', s));
+    if(q) fd.append('q', q);
+
+    const res = await fetch('/manuals/api/tree', { method:'POST', body: fd });
+    const data = await res.json();
+    const tree = data.tree || [];
+
+    lastTree = tree;
+    if(!tree.length){
+      treeEl.innerHTML = '<p class="muted">선택한 SW/버전에 등록된 트리가 없습니다.</p>';
+      return;
+    }
+    renderTree(tree);
   }
 
   function renderTree(tree){
@@ -144,27 +173,43 @@
 
   function renderNode(n){
     const li = document.createElement('li');
+    li.dataset.id = n.id;
+
     const row = document.createElement('div');
     row.className = 'node-row' + (n.highlight ? ' hit' : '');
+
     const tri = document.createElement('span');
     tri.className='tri';
     tri.textContent = (n.children && n.children.length) ? '▸':'';
+
     const cb = document.createElement('input');
     cb.type='checkbox';
     cb.indeterminate = (n.state==='partial');
     cb.checked = (n.state==='checked');
+
     const label = document.createElement('span');
     label.textContent = n.title; label.style.cursor='pointer';
+
     row.appendChild(tri); row.appendChild(cb); row.appendChild(label);
     li.appendChild(row);
 
-    const kids = document.createElement('ul'); kids.style.display='none';
+    const kids = document.createElement('ul');
+    kids.style.display='none';
     li.appendChild(kids);
 
+    // 펼침 상태 복구
+    if(expandedIds.has(n.id)){
+      kids.style.display = 'block';
+      tri.textContent = (n.children && n.children.length) ? '▾' : '';
+    }
+
     if(n.children && n.children.length){
+      tri.style.cursor='pointer';
       tri.addEventListener('click', ()=>{
-        kids.style.display = (kids.style.display==='none' ? 'block' : 'none');
-        tri.textContent = kids.style.display==='none' ? '▸' : '▾';
+        const opened = kids.style.display !== 'none';
+        kids.style.display = opened ? 'none' : 'block';
+        tri.textContent = opened ? '▸' : '▾';
+        if(opened) expandedIds.delete(n.id); else expandedIds.add(n.id);
       });
       n.children.forEach(c => kids.appendChild(renderNode(c)));
     }
@@ -172,23 +217,23 @@
     label.addEventListener('click', ()=>showDetail(n));
 
     cb.addEventListener('change', async ()=>{
+      // 저장 전에 펼침 상태 스냅샷
+      snapshotExpanded();
+
       const sw = selectedSW();
-      const res = await fetch('/manuals/api/check', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          version_id: Number(versionEl.value),
-          sw_ids: sw.map(Number),
-          node_id: Number(n.id),
-          checked: !!cb.checked
-        })
-      });
+      const fd = new FormData();
+      fd.append('version_id', Number(versionEl.value));
+      fd.append('sw_ids', sw.join(','));
+      fd.append('node_id', Number(n.id));
+      fd.append('checked', cb.checked ? '1' : '0');
+
+      const res = await fetch('/manuals/api/check', { method:'POST', body: fd });
       if(!res.ok){
         const t = await res.text(); alert('저장 실패\n' + t); return;
       }
-      loadTree();
+      loadTree(); // 리로드해도 펼침 상태 유지됨
     });
-    
+
     return li;
   }
 
@@ -209,9 +254,9 @@
     `;
     const softSel = wrap.querySelector('#softSel');
     for(const s of selectedSW()){
-      const opt = document.createElement('option');
-      const pill = document.querySelector(`.pill[data-id="${s}"]`);
-      opt.value = s; opt.textContent = pill ? pill.textContent : s;
+      const pill = document.querySelector(`.pill[data-id="${String(s)}"]`);
+      opt.value = String(s);
+      opt.textContent = pill ? pill.textContent.trim() : String(s);
       softSel.appendChild(opt);
     }
     wrap.querySelector('#upform').addEventListener('submit', async (e)=>{
@@ -226,11 +271,17 @@
   }
 
   function debounce(fn,ms){let t; return (...a)=>{clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
+  function getAllIds(tree, acc=[]){
+    for(const n of (tree||[])){ acc.push(n.id); getAllIds(n.children, acc); }
+    return acc;
+  }
 
-  // 초기: 첫 1~2개 SW pill을 기본 선택해주면 빈 화면 방지
+  // 기본으로 Leopard_Client 하나만 선택
   (function primeSW(){
-    const pills = swBox.querySelectorAll('.pill');
-    for(let i=0;i<Math.min(2,pills.length);i++){ pills[i].classList.add('active'); }
+    const pills = Array.from(swBox.querySelectorAll('.pill'));
+    const client = pills.find(p=>p.textContent.trim()==='Leopard_Client');
+    if(client){ client.classList.add('active'); }
+    else if(pills[0]){ pills[0].classList.add('active'); }
   })();
 
   loadTree();

@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any, Iterable
 import hashlib, hmac, secrets, string
 from passlib.hash import bcrypt, argon2
 from urllib.parse import quote
-from fastapi import FastAPI, Request, Form, Depends, HTTPException
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -32,7 +32,7 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-prod")
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///naiz.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////app/data/naiz.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -182,6 +182,7 @@ def current_roles(request: Request) -> list[str]:
 def has_role(request: Request, *codes: Iterable[str]) -> bool:
     roles = set((r or "").upper() for r in current_roles(request))
     return any(((c or "").upper() in roles) for c in codes)
+
 # ------------------------------------------------------------------------------
 #// 모델 (최신 DDL 반영)
 # ------------------------------------------------------------------------------

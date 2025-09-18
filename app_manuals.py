@@ -1,511 +1,386 @@
-# app_manuals.py
-from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, HTTPException, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
-from sqlalchemy import (
-    Column, Integer, String, Text, ForeignKey, DateTime, Boolean, func,
-    UniqueConstraint, create_engine
-)
-from sqlalchemy.orm import relationship, Session, declarative_base, sessionmaker
-from typing import List, Optional, Dict, Any
-from pathlib import Path
-import io, os, shutil, enum
+# app_manuals.py — 매뉴얼 업로드/목록/다운로드/삭제/ZIP 내보내기
+import os
+import io
+import re
+import zipfile
 from datetime import datetime
-from auth_utils import require_master, require_tech, require_login
-from types import SimpleNamespace
+from pathlib import Path
+from typing import Optional, List
 
-# ──────────────────────────────────────────────────────────────────────────────
-# DB/세션 (app.py import 금지: 순환참조 방지)
-# ──────────────────────────────────────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./naiz.db")
+from fastapi import APIRouter, Request, Depends, UploadFile, File, Form, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse, PlainTextResponse
+from fastapi.templating import Jinja2Templates
+from starlette.status import HTTP_302_FOUND
+
+from sqlalchemy import (
+    create_engine, Column, Integer, String, Text, DateTime, func, select, or_
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, Session as OrmSession
+
+# (중요) 로그인/권한 가드: 기존 프로젝트 헬퍼 재사용
+from auth_utils import require_login, require_tech, require_master
+
+# ------------------------------------------------------------------------------
+# 기본 경로/엔진 설정 (app.py와 같은 DATABASE_URL 환경설정 재사용)
+# ------------------------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = BASE_DIR / "templates"     # 기존 템플릿 폴더
+UPLOADS_ROOT = BASE_DIR / "uploads"        # app.py 가 app.mount("/uploads", StaticFiles(directory="uploads"))로 마운트함
+MANUALS_DIR  = UPLOADS_ROOT / "manuals"    # 매뉴얼은 /uploads/manuals/에 보관
+
+MANUALS_DIR.mkdir(parents=True, exist_ok=True)
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////app/data/naiz.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 engine = create_engine(
     DATABASE_URL,
+    future=True,
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-def get_db():
+def get_db() -> OrmSession:
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-templates = Jinja2Templates(directory="templates")
-Base = declarative_base()
-router = APIRouter(prefix="/manuals", tags=["manuals"])
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+router = APIRouter()
 
-# 업로드 루트
-UPLOAD_ROOT = Path("uploads/manuals")
-UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # 모델
-# ──────────────────────────────────────────────────────────────────────────────
-class Version(Base):
-    __tablename__ = "versions"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, index=True)
-    created_at = Column(DateTime, default=func.now())
+# ------------------------------------------------------------------------------
+Base = declarative_base()
 
-class Software(Base):
-    __tablename__ = "software"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, index=True)
-    created_at = Column(DateTime, default=func.now())
+class ManualDoc(Base):
+    __tablename__ = "manual_docs"
+    id          = Column(Integer, primary_key=True)
+    section     = Column(String, nullable=False)   # 예) "1.1 소개"
+    title       = Column(String, nullable=False)   # 예) "도입부 이미지"
+    orig_name   = Column(String, nullable=True)    # 업로드 당시 원본 파일명
+    stored_rel  = Column(String, nullable=False)   # 웹 상대경로 (예: /uploads/manuals/20250918_153000_img.png)
+    mime_type   = Column(String, nullable=True)
+    size_bytes  = Column(Integer, nullable=True)
+    note        = Column(Text, nullable=True)
+    uploaded_at = Column(DateTime, nullable=False, default=func.datetime("now", "localtime"))
 
-class ManualNode(Base):
-    __tablename__ = "manual_nodes"
-    id = Column(Integer, primary_key=True)
-    title = Column(String, nullable=False)
-    parent_id = Column(Integer, ForeignKey("manual_nodes.id"), nullable=True)
-    sort_order = Column(Integer, default=0)
-    is_section = Column(Boolean, default=True)
-    parent = relationship("ManualNode", remote_side=[id], backref="children", lazy="joined")
-
-class ManualNodeRevision(Base):
-    __tablename__ = "manual_node_revisions"
-    id = Column(Integer, primary_key=True)
-    node_id = Column(Integer, ForeignKey("manual_nodes.id"), index=True, nullable=False)
-    software_id = Column(Integer, ForeignKey("software.id"), index=True, nullable=False)
-    version_id = Column(Integer, ForeignKey("versions.id"), index=True, nullable=False)
-    checked = Column(Boolean, default=False)
-    summary = Column(Text, nullable=True)
-    updated_by = Column(Integer, nullable=True)  # users 테이블 없을 수 있어 FK 제거
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    node = relationship("ManualNode", lazy="joined")
-    software = relationship("Software", lazy="joined")
-    version = relationship("Version", lazy="joined")
-    __table_args__ = (UniqueConstraint("node_id", "software_id", "version_id", name="uniq_node_sw_ver"),)
-
-class Attachment(Base):
-    __tablename__ = "attachments"
-    id = Column(Integer, primary_key=True)
-    revision_id = Column(Integer, ForeignKey("manual_node_revisions.id"), index=True, nullable=False)
-    filename = Column(String, nullable=False)
-    stored_path = Column(String, nullable=False)
-    mime = Column(String, nullable=True)
-    size = Column(Integer, nullable=True)
-    uploaded_at = Column(DateTime, default=func.now())
-    revision = relationship("ManualNodeRevision", backref="attachments", lazy="joined")
-
-class ChangeLog(Base):
-    __tablename__ = "manual_changelog"
-    id = Column(Integer, primary_key=True)
-    node_id = Column(Integer, index=True)
-    software_id = Column(Integer, index=True)
-    version_id = Column(Integer, index=True)
-    changed_by = Column(Integer, nullable=True)
-    change_note = Column(Text)
-    changed_at = Column(DateTime, default=func.now())
-
-# 스키마 생성(존재하면 no-op)
+# 최초 로드시 테이블 생성
 Base.metadata.create_all(bind=engine)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 권한/현재 사용자
-# ──────────────────────────────────────────────────────────────────────────────
-def current_user_dep(request: Request):
-    require_login(request)
-    u = request.session.get("user") or {}
-    return SimpleNamespace(
-        id=u.get("emp_id") or u.get("id") or 0,
-        login_id=u.get("login_id"),
-        roles=u.get("roles", []),
-        name=u.get("name"),
-    )
+# ------------------------------------------------------------------------------
+# 유틸
+# ------------------------------------------------------------------------------
+_filename_pat = re.compile(r'[^A-Za-z0-9._-]+')
 
-def dep_master(request: Request, user=Depends(current_user_dep)):
-    require_master(request)
-    return user
+def secure_filename(name: str) -> str:
+    name = (name or "").strip().replace(" ", "_")
+    name = _filename_pat.sub("", name)
+    if not name:
+        name = "file"
+    # 확장자 보존
+    if "." in name:
+        base, ext = name.rsplit(".", 1)
+        return f"{base}.{ext}"
+    return name
 
-def dep_tech(request: Request, user=Depends(current_user_dep)):
-    require_tech(request)
-    return user
+def _now_stamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 페이지
-# ──────────────────────────────────────────────────────────────────────────────
-@router.get("/", response_class=HTMLResponse, name="manuals_page")
-def manuals_page(request: Request, db: Session = Depends(get_db)):
-    require_login(request)
-    versions = db.query(Version).order_by(Version.created_at.desc()).all()
-    sw = db.query(Software).order_by(Software.name).all()
-    return templates.TemplateResponse(
-        "manuals.html",
-        {"request": request, "versions": versions, "software": sw},
-    )
-
-# 드롭다운 데이터
-@router.get("/api/versions")
-def api_versions(db: Session = Depends(get_db)):
-    rows = db.query(Version).order_by(Version.created_at.desc()).all()
-    return [{"id": r.id, "name": r.name} for r in rows]
-
-@router.get("/api/software")
-def api_software(db: Session = Depends(get_db)):
-    rows = db.query(Software).order_by(Software.name).all()
-    return [{"id": r.id, "name": r.name} for r in rows]
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 트리 조회 (GET/POST 모두 허용)  ← 405 해결 포인트
-# ──────────────────────────────────────────────────────────────────────────────
-def _tri_state(checked_children: List[bool]) -> str:
-    if not checked_children:
-        return "unchecked"
-    if all(checked_children):
-        return "checked"
-    if any(checked_children):
-        return "partial"
-    return "unchecked"
-
-@router.api_route("/api/tree", methods=["GET", "POST"])
-async def api_tree(
-    request: Request,
-    db: Session = Depends(get_db),
-    # GET 쿼리 기본값
-    version_id: Optional[int] = Query(None),
-    sw_ids: Optional[List[int]] = Query(None),
-    q: Optional[str] = Query(None),
-):
+# ------------------------------------------------------------------------------
+# 뷰: 목록
+# ------------------------------------------------------------------------------
+@router.get("/manuals", response_class=HTMLResponse)
+def manuals_list(request: Request,
+                 db: OrmSession = Depends(get_db),
+                 section: Optional[str] = None,
+                 q: Optional[str] = None):
+    """매뉴얼 파일 목록 + 필터 + CSV/ZIP 내보내기 안내"""
     require_login(request)
 
-    # POST 폼 지원
-    if request.method == "POST":
-        form = await request.form()
-        if version_id is None and "version_id" in form:
-            version_id = int(form.get("version_id"))
-        # sw_ids는 "1,2,3" 또는 다중키로 올 수 있음
-        if (not sw_ids) and ("sw_ids" in form):
-            # Starlette FormData는 getlist 지원
-            raw_list = form.getlist("sw_ids")
-            if len(raw_list) == 1 and ("," in raw_list[0]):
-                sw_ids = [int(x) for x in raw_list[0].split(",") if x]
-            else:
-                sw_ids = [int(x) for x in raw_list if x]
-        if q is None:
-            q = form.get("q")
-
-    if not version_id or not sw_ids:
-        return {"tree": []}
-
-    all_nodes: List[ManualNode] = db.query(ManualNode).all()
-
-    revs = db.query(ManualNodeRevision).filter(
-        ManualNodeRevision.version_id == version_id,
-        ManualNodeRevision.software_id.in_(sw_ids),
-    ).all()
-
-    # node_id -> (해당 SW들 중 하나라도 checked면 True)
-    checked_map: Dict[int, bool] = {}
-    for r in revs:
-        checked_map[r.node_id] = checked_map.get(r.node_id, False) or bool(r.checked)
-
-    # 검색: 매치 노드와 조상은 무조건 표시되도록 id 수집
-    match_ids = set()
+    qset = db.query(ManualDoc)
+    if section:
+        qset = qset.filter(ManualDoc.section == section)
     if q:
-        ql = q.lower()
-        for n in all_nodes:
-            if ql in (n.title or "").lower():
-                match_ids.add(n.id)
-                p = n.parent
-                while p:
-                    match_ids.add(p.id)
-                    p = p.parent
-
-    def serialize(n: ManualNode) -> Dict[str, Any]:
-        kids = [serialize(c) for c in sorted(n.children, key=lambda x: (x.sort_order, x.id))]
-        states = [k["state"] for k in kids]
-        child_checked_flags = [s == "checked" for s in states]
-        node_checked = checked_map.get(n.id, False)
-
-        if not kids:
-            state = "checked" if node_checked else "unchecked"
-        else:
-            if node_checked and all(child_checked_flags):
-                state = "checked"
-            else:
-                ts = _tri_state(child_checked_flags or [node_checked])
-                state = "partial" if (node_checked and ts == "unchecked") else ts
-
-        return {
-            "id": n.id,
-            "title": n.title,
-            "is_section": n.is_section,
-            "state": state,
-            "children": kids,
-            "highlight": (n.id in match_ids) if q else False,
-        }
-
-    roots = [n for n in all_nodes if n.parent_id is None]
-    roots.sort(key=lambda x: (x.sort_order, x.id))
-    tree = [serialize(r) for r in roots]
-    return {"tree": tree}
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 체크/해제 저장(부모-자식 전파)
-# ──────────────────────────────────────────────────────────────────────────────
-@router.post("/api/check")
-def api_check(
-    request: Request,
-    version_id: int = Form(...),
-    sw_ids: str = Form(...),      # "1,2,3"
-    node_id: int = Form(...),
-    checked: bool = Form(...),
-    db: Session = Depends(get_db),
-    actor: Any = Depends(dep_tech),  # TECH 이상
-):
-    require_login(request)
-    sw_list = [int(x) for x in sw_ids.split(",") if x]
-
-    queue: List[int] = []
-    def collect(nid: int):
-        queue.append(nid)
-        for c in db.query(ManualNode).filter(ManualNode.parent_id == nid).all():
-            collect(c.id)
-    collect(node_id)
-
-    changer_id = getattr(actor, "id", None)
-
-    for nid in queue:
-        for sw in sw_list:
-            rev = db.query(ManualNodeRevision).filter_by(
-                node_id=nid, software_id=sw, version_id=version_id
-            ).first()
-            if not rev:
-                rev = ManualNodeRevision(
-                    node_id=nid, software_id=sw, version_id=version_id,
-                    checked=checked, updated_by=changer_id
-                )
-                db.add(rev)
-            else:
-                rev.checked = checked
-                rev.updated_by = changer_id
-
-        db.add(ChangeLog(
-            node_id=nid, software_id=sw_list[0], version_id=version_id,
-            changed_by=changer_id, change_note=f"check={checked}"
+        like = f"%{q}%"
+        qset = qset.filter(or_(
+            ManualDoc.section.ilike(like),
+            ManualDoc.title.ilike(like),
+            ManualDoc.orig_name.ilike(like),
+            ManualDoc.note.ilike(like),
         ))
+    items = qset.order_by(ManualDoc.id.desc()).all()
 
-    db.commit()
-    return {"ok": True}
+    # 간단한 테이블 템플릿(기존 generic_list를 써도 되지만, 여기선 자체 HTML로 가볍게 구성)
+    html = """
+    {% extends "base.html" %}
+    {% block title %}매뉴얼 - NAIZ{% endblock %}
+    {% block content %}
+    <h1 class="mb-2">매뉴얼</h1>
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 첨부 업로드
-# ──────────────────────────────────────────────────────────────────────────────
-@router.post("/api/upload")
-def api_upload(
-    request: Request,
-    version_id: int = Form(...),
-    software_id: int = Form(...),
-    node_id: int = Form(...),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    user: Any = Depends(dep_tech),
-):
-    require_login(request)
-    changer_id = getattr(user, "id", None)
+    <form method="get" class="filter" style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;">
+      <div>
+        <label>섹션</label>
+        <input type="text" name="section" value="{{ section or '' }}" placeholder='예: 1.1 소개'>
+      </div>
+      <div>
+        <label>검색</label>
+        <input type="text" name="q" value="{{ q or '' }}" placeholder="제목/원본명/메모 검색">
+      </div>
+      <div>
+        <button class="btn btn-outline" type="submit">적용</button>
+        <a class="btn" href="/manuals">초기화</a>
+        <a class="btn primary" href="/manuals/new">+ 업로드</a>
+        <a class="btn" href="/manuals/export.zip{% if section or q %}?{{ 'section=' ~ section if section }}{% if section and q %}&{% endif %}{{ 'q=' ~ q if q }}{% endif %}">ZIP로 내보내기</a>
+      </div>
+    </form>
 
-    rev = db.query(ManualNodeRevision).filter_by(
-        node_id=node_id, software_id=software_id, version_id=version_id
-    ).first()
-    if not rev:
-        rev = ManualNodeRevision(
-            node_id=node_id, software_id=software_id, version_id=version_id,
-            checked=False, updated_by=changer_id
-        )
-        db.add(rev)
-        db.flush()
-
-    node_dir = UPLOAD_ROOT / f"v{version_id}_sw{software_id}" / str(node_id)
-    node_dir.mkdir(parents=True, exist_ok=True)
-    stored_path = node_dir / file.filename
-
-    with open(stored_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    att = Attachment(
-        revision_id=rev.id,
-        filename=file.filename,
-        stored_path=str(stored_path),
-        mime=file.content_type,
-        size=stored_path.stat().st_size,
+    <div class="card" style="margin-top:12px;">
+      <div class="card-body" style="overflow:auto;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:70px;text-align:center;">ID</th>
+              <th>섹션</th>
+              <th>제목</th>
+              <th>원본파일</th>
+              <th>미리보기/다운로드</th>
+              <th style="width:100px;text-align:center;">크기</th>
+              <th style="width:180px;">업로드</th>
+              <th style="width:120px;text-align:center;">작업</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for m in items %}
+            <tr>
+              <td style="text-align:center;">{{ m.id }}</td>
+              <td>{{ m.section }}</td>
+              <td>{{ m.title }}</td>
+              <td>{{ m.orig_name or '' }}</td>
+              <td>
+                {% if m.stored_rel %}
+                  <a href="{{ m.stored_rel }}" target="_blank">열기</a>
+                  &nbsp;|&nbsp;
+                  <a href="/manuals/file/{{ m.id }}">다운로드</a>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td style="text-align:right;">{{ (m.size_bytes or 0) | comma }}</td>
+              <td>{{ (m.uploaded_at or '') }}</td>
+              <td style="text-align:center;">
+                <form method="post" action="/manuals/delete/{{ m.id }}" onsubmit="return confirm('삭제하시겠습니까?');" style="display:inline;">
+                  <button class="btn" type="submit">삭제</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+          {% if items|length == 0 %}
+            <tr><td colspan="8" style="text-align:center;color:#777;">등록된 매뉴얼이 없습니다.</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endblock %}
+    """
+    return templates.TemplateResponse(
+        template_name=templates.from_string(html).template.name,
+        context={"request": request, "items": items, "section": section, "q": q}
     )
-    db.add(att)
 
-    db.add(ChangeLog(
-        node_id=node_id, software_id=software_id, version_id=version_id,
-        changed_by=changer_id, change_note=f"upload:{file.filename}"
-    ))
+# ------------------------------------------------------------------------------
+# 뷰: 업로드 폼
+# ------------------------------------------------------------------------------
+@router.get("/manuals/new", response_class=HTMLResponse)
+def manuals_new(request: Request):
+    require_login(request)
+    html = """
+    {% extends "base.html" %}
+    {% block title %}매뉴얼 업로드 - NAIZ{% endblock %}
+    {% block content %}
+    <h1 class="mb-2">매뉴얼 업로드</h1>
+    <div class="card">
+      <div class="card-body">
+        <form method="post" action="/manuals/new" enctype="multipart/form-data" class="form">
+          <div class="mb-2">
+            <label>섹션<span style="color:#e11;">*</span></label>
+            <input class="form-control" type="text" name="section" placeholder="예: 1.1 소개" required>
+          </div>
+          <div class="mb-2">
+            <label>제목<span style="color:#e11;">*</span></label>
+            <input class="form-control" type="text" name="title" placeholder="예: 도입부 이미지" required>
+          </div>
+          <div class="mb-2">
+            <label>메모</label>
+            <textarea class="form-control" name="note" rows="3" placeholder="추가 설명 (선택)"></textarea>
+          </div>
+          <div class="mb-2">
+            <label>파일<span style="color:#e11;">*</span></label>
+            <input class="form-control" type="file" name="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" required>
+          </div>
+          <div class="mt-2" style="display:flex;gap:8px;">
+            <button class="btn btn-primary" type="submit">업로드</button>
+            <a class="btn btn-outline" href="/manuals">목록</a>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endblock %}
+    """
+    return templates.TemplateResponse(
+        template_name=templates.from_string(html).template.name,
+        context={"request": request}
+    )
 
+# ------------------------------------------------------------------------------
+# 액션: 업로드 저장
+# ------------------------------------------------------------------------------
+@router.post("/manuals/new")
+async def manuals_new_submit(
+    request: Request,
+    db: OrmSession = Depends(get_db),
+    section: str = Form(...),
+    title: str = Form(...),
+    note: Optional[str] = Form(None),
+    file: UploadFile = File(...)
+):
+    require_login(request)
+
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="파일이 필요합니다.")
+
+    safe = secure_filename(file.filename)
+    ts   = _now_stamp()
+    saved_name = f"{ts}_{safe}"
+    dest = MANUALS_DIR / saved_name
+
+    raw = await file.read()
+    with open(dest, "wb") as f:
+        f.write(raw)
+
+    rel_web = f"/uploads/manuals/{saved_name}"
+    m = ManualDoc(
+        section=section.strip(),
+        title=title.strip(),
+        orig_name=file.filename,
+        stored_rel=rel_web,
+        mime_type=(file.content_type or None),
+        size_bytes=len(raw),
+        note=(note or None),
+    )
+    db.add(m)
     db.commit()
-    return {"ok": True, "attachment_id": att.id}
 
-# ──────────────────────────────────────────────────────────────────────────────
-# PDF 내보내기(체크 항목만)
-# ──────────────────────────────────────────────────────────────────────────────
-@router.post("/export/pdf")
-def export_pdf(
+    return RedirectResponse(url="/manuals", status_code=HTTP_302_FOUND)
+
+# ------------------------------------------------------------------------------
+# 파일 다운로드 (원본명으로 내려주기)
+# ------------------------------------------------------------------------------
+@router.get("/manuals/file/{mid}", response_class=FileResponse)
+def manuals_file(mid: int, db: OrmSession = Depends(get_db)):
+    require_login  # 가드로 사용하려면 위에 데코레이터/미들웨어에서 처리되므로 명시적 호출은 생략
+
+    m = db.get(ManualDoc, mid)
+    if not m:
+        raise HTTPException(status_code=404, detail="파일 정보를 찾을 수 없습니다.")
+    if not m.stored_rel or not m.stored_rel.startswith("/uploads/manuals/"):
+        raise HTTPException(status_code=400, detail="파일 경로가 올바르지 않습니다.")
+
+    disk = BASE_DIR / m.stored_rel.lstrip("/")
+    if not disk.exists():
+        raise HTTPException(status_code=404, detail="디스크에 파일이 없습니다.")
+
+    return FileResponse(
+        path=str(disk),
+        media_type=(m.mime_type or "application/octet-stream"),
+        filename=(m.orig_name or disk.name)
+    )
+
+# ------------------------------------------------------------------------------
+# 삭제 (레코드+디스크)
+# ------------------------------------------------------------------------------
+@router.post("/manuals/delete/{mid}")
+def manuals_delete(request: Request, mid: int, db: OrmSession = Depends(get_db)):
+    require_login(request)
+
+    m = db.get(ManualDoc, mid)
+    if not m:
+        return RedirectResponse(url="/manuals", status_code=HTTP_302_FOUND)
+
+    # 디스크 파일 삭제 (있을 때만)
+    if m.stored_rel and m.stored_rel.startswith("/uploads/manuals/"):
+        disk = BASE_DIR / m.stored_rel.lstrip("/")
+        try:
+            if disk.exists():
+                disk.unlink()
+        except Exception:
+            # 파일 삭제 실패해도 DB는 진행
+            pass
+
+    db.delete(m)
+    db.commit()
+    return RedirectResponse(url="/manuals", status_code=HTTP_302_FOUND)
+
+# ------------------------------------------------------------------------------
+# ZIP 내보내기 (필터 적용)
+# ------------------------------------------------------------------------------
+@router.get("/manuals/export.zip")
+def manuals_export_zip(
     request: Request,
-    version_id: int = Form(...),
-    sw_ids: str = Form(...),
-    cover_title: str = Form("메뉴얼"),
-    db: Session = Depends(get_db),
+    db: OrmSession = Depends(get_db),
+    section: Optional[str] = None,
+    q: Optional[str] = None
 ):
     require_login(request)
-    try:
-        from weasyprint import HTML  # 함수 내부 임포트
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "WeasyPrint(HTML→PDF) 의존성이 설치되지 않았습니다. "
-                "Windows에선 GTK/Pango/Cairo 구성 또는 WSL/도커 환경을 사용하세요. "
-                f"원인: {e}"
-            ),
-        )
 
-    sw_list = [int(x) for x in sw_ids.split(",") if x]
-    version = db.query(Version).get(version_id)
-    sw_names = [s.name for s in db.query(Software).filter(Software.id.in_(sw_list)).all()]
-
-    revs = db.query(ManualNodeRevision).filter(
-        ManualNodeRevision.version_id == version_id,
-        ManualNodeRevision.software_id.in_(sw_list),
-        ManualNodeRevision.checked.is_(True)
-    ).all()
-    include_ids = sorted({r.node_id for r in revs})
-
-    def flatten(node: ManualNode, out: list):
-        out.append(node)
-        for c in sorted(node.children, key=lambda x: (x.sort_order, x.id)):
-            flatten(c, out)
-
-    roots = db.query(ManualNode).filter(ManualNode.parent_id.is_(None)).all()
-    ordered = []
-    for r in sorted(roots, key=lambda x: (x.sort_order, x.id)):
-        flatten(r, ordered)
-
-    selected_nodes = [n for n in ordered if n.id in include_ids]
-
-    toc_items = []
-    body_parts = []
-
-    cover_html = f"""
-    <section class="cover">
-        <h1>{cover_title}</h1>
-        <h2>버전: {version.name if version else ''}</h2>
-        <p>SW: {", ".join(sw_names)}</p>
-        <p>생성일: {datetime.now().strftime("%Y-%m-%d %H:%M")}</p>
-    </section>
-    <div class="pagebreak"></div>
-    """
-
-    for idx, n in enumerate(selected_nodes, start=1):
-        toc_items.append(f"<li>{idx}. {n.title}</li>")
-    toc_html = f"""
-    <section class="toc">
-        <h2>목차</h2>
-        <ol>
-            {''.join(toc_items)}
-        </ol>
-    </section>
-    <div class="pagebreak"></div>
-    """
-
-    for idx, n in enumerate(selected_nodes, start=1):
-        rev = db.query(ManualNodeRevision).filter(
-            ManualNodeRevision.node_id == n.id,
-            ManualNodeRevision.version_id == version_id,
-            ManualNodeRevision.software_id.in_(sw_list)
-        ).first()
-        atts = rev.attachments if rev else []
-        files_html = "".join(f"<li>{a.filename}</li>" for a in atts)
-        body_parts.append(f"""
-        <section class="section">
-            <h3>{idx}. {n.title}</h3>
-            {'<p>'+ (rev.summary or '') + '</p>' if (rev and rev.summary) else ''}
-            {'<ul>'+files_html+'</ul>' if files_html else '<p>(첨부 없음)</p>'}
-        </section>
-        <div class="pagebreak"></div>
-        """)
-
-    html = f"""
-    <html>
-    <head>
-    <meta charset="utf-8" />
-    <style>
-    @page {{ size: A4; margin: 20mm; }}
-    body {{ font-family: "Noto Sans CJK KR", "Malgun Gothic", sans-serif; }}
-    h1,h2,h3 {{ margin: 0 0 12px 0; }}
-    .cover {{ text-align:center; padding-top: 120px; }}
-    .toc ol {{ padding-left: 20px; }}
-    .section {{ page-break-inside: avoid; }}
-    .pagebreak {{ page-break-after: always; }}
-    footer {{ position: fixed; bottom: 5mm; right: 10mm; font-size: 10px; }}
-    </style>
-    </head>
-    <body>
-    {cover_html}
-    {toc_html}
-    {''.join(body_parts)}
-    <footer>Generated at {datetime.now().strftime("%Y-%m-%d %H:%M")}</footer>
-    </body>
-    </html>
-    """
-    pdf = HTML(string=html, base_url=str(Path(".").absolute())).write_pdf()
-    filename = f'manual_{version.name if version else "unknown"}.pdf'
-    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
-                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 다중 업로드
-# ──────────────────────────────────────────────────────────────────────────────
-@router.post("/api/bulk-import")
-def bulk_import(
-    request: Request,
-    version_id: int = Form(...),
-    software_id: int = Form(...),
-    node_id: int = Form(...),
-    files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    user: Any = Depends(dep_tech),
-):
-    require_login(request)
-    changer_id = getattr(user, "id", None)
-
-    rev = db.query(ManualNodeRevision).filter_by(
-        node_id=node_id, software_id=software_id, version_id=version_id
-    ).first()
-    if not rev:
-        rev = ManualNodeRevision(
-            node_id=node_id, software_id=software_id, version_id=version_id,
-            checked=False, updated_by=changer_id
-        )
-        db.add(rev)
-        db.flush()
-
-    node_dir = UPLOAD_ROOT / f"v{version_id}_sw{software_id}" / str(node_id)
-    node_dir.mkdir(parents=True, exist_ok=True)
-
-    for f in files:
-        stored_path = node_dir / f.filename
-        with open(stored_path, "wb") as out:
-            shutil.copyfileobj(f.file, out)
-
-        att = Attachment(
-            revision_id=rev.id,
-            filename=f.filename,
-            stored_path=str(stored_path),
-            mime=f.content_type,
-            size=stored_path.stat().st_size,
-        )
-        db.add(att)
-
-        db.add(ChangeLog(
-            node_id=node_id, software_id=software_id, version_id=version_id,
-            changed_by=changer_id, change_note=f"upload:{f.filename}"
+    qset = db.query(ManualDoc)
+    if section:
+        qset = qset.filter(ManualDoc.section == section)
+    if q:
+        like = f"%{q}%"
+        qset = qset.filter(or_(
+            ManualDoc.section.ilike(like),
+            ManualDoc.title.ilike(like),
+            ManualDoc.orig_name.ilike(like),
+            ManualDoc.note.ilike(like),
         ))
+    rows: List[ManualDoc] = qset.order_by(ManualDoc.id.asc()).all()
+    if not rows:
+        return PlainTextResponse("내보낼 파일이 없습니다.", status_code=404)
 
-    db.commit()
-    return {"ok": True}
+    # 메모리 ZIP
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        # 인덱스 CSV 포함
+        index_lines = ["id,section,title,orig_name,stored_rel,uploaded_at,size_bytes"]
+        for m in rows:
+            index_lines.append(
+                f'{m.id},"{(m.section or "").replace("\"","\"\"")}","{(m.title or "").replace("\"","\"\"")}",'
+                f'"{(m.orig_name or "").replace("\"","\"\"")}",{m.stored_rel},{m.uploaded_at},{m.size_bytes or 0}'
+            )
+
+            if m.stored_rel and m.stored_rel.startswith("/uploads/manuals/"):
+                disk = BASE_DIR / m.stored_rel.lstrip("/")
+                if disk.exists():
+                    # ZIP 내부 경로: section/원본명(없으면 저장명)
+                    inner_name = (m.orig_name or disk.name)
+                    # 섹션 폴더로 정리
+                    inner_path = f"{m.section or 'misc'}/{inner_name}"
+                    # 동일 파일명 충돌 시 id 프리픽스
+                    if inner_path in z.namelist():
+                        inner_path = f"{m.section or 'misc'}/{m.id}_{inner_name}"
+                    z.write(str(disk), arcname=inner_path)
+
+        z.writestr("index.csv", "\ufeff" + "\n".join(index_lines))  # BOM 추가(엑셀 호환)
+
+    buf.seek(0)
+    fname = f"manuals_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'}
+    )
