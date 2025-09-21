@@ -1,17 +1,17 @@
 services:
-  app:
-    image: techsupport-app
-    build: .
+  techsupport_app:
     container_name: techsupport_app
+    build:
+      context: .               # <- 현재 폴더를 빌드 컨텍스트로
+      dockerfile: dockerfile   # <- 파일명이 'dockerfile'인 경우 반드시 지정
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     environment:
-      # 컨테이너 내부 절대경로를 명시 (앱 기본값과 일치)
-      - DATABASE_URL=sqlite:////app/data/naiz.db
+      - DATABASE_URL=sqlite:///./data/naiz.db   # <-- 너의 실제 DB 위치
+      - MANUALS_DIR=/app/uploads/manuals
+      - TZ=Asia/Seoul
     volumes:
-      # 소스 코드 핫리로드
-      - .:/app
-      # DB 파일만 안전하게 바인드 (윈도우 경로 → 컨테이너 내부 경로)
+      - ./:/app               # 앱 코드
+      - ./uploads:/app/uploads
       - ./data:/app/data
-    command: >
-      uvicorn app:app --host 0.0.0.0 --port 8000 --reload
