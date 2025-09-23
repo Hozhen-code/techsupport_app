@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mx-auto px-4 py-6">
+  <h2 class="text-lg font-semibold mb-4">메뉴얼</h2>
+  <div class="grid grid-cols-12 gap-4">
+    <!-- 좌측 사이드 -->
+    <div class="col-span-3">
+      <div class="bg-white rounded shadow p-3 space-y-4">
+        <div>
+          <label class="text-sm text-gray-600">버전</label>
+          <select id="ver-select" class="w-full border rounded px-2 py-1">
+            {% for v in versions %}
+              <option value="{{ v.name }}">{{ v.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="text-sm text-gray-600">SW</label>
+          <div id="sw-list" class="space-y-2">
+            {% for s in software %}
+            <button class="w-full border rounded px-3 py-2 text-left hover:bg-gray-50"
+                    data-sw="{{ s.name }}">
+              {{ s.name }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="pt-4">
+          <a id="btnExportPdf"
+             href="#"
+             class="block text-center bg-blue-600 text-white text-sm rounded px-3 py-2 hover:bg-blue-700">
+             PDF 내보내기
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 우측 뷰어 -->
+    <div class="col-span-9">
+      <div class="bg-white rounded shadow overflow-hidden" style="height: calc(100vh - 180px);">
+        <iframe id="manual-iframe"
+                srcdoc="<h1 style='text-align:center;margin-top:20%'>RMD를 html로 변환한 것을 뷰어</h1>"
+                style="width:100%;height:100%;border:0;"></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/manuals.js"></script>
+{% endblock %}

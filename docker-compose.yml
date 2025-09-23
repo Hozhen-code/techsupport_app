@@ -2,16 +2,32 @@ services:
   techsupport_app:
     container_name: techsupport_app
     build:
-      context: .               # <- 현재 폴더를 빌드 컨텍스트로
-      dockerfile: dockerfile   # <- 파일명이 'dockerfile'인 경우 반드시 지정
+      context: .               # 현재 폴더를 빌드 컨텍스트로
+      dockerfile: dockerfile   # 파일명이 'dockerfile'인 경우 반드시 지정
     command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:///./data/naiz.db   # <-- 너의 실제 DB 위치
+      - DATABASE_URL=sqlite:///./data/naiz.db   # 실제 DB 위치
       - MANUALS_DIR=/app/uploads/manuals
       - TZ=Asia/Seoul
     volumes:
       - ./:/app               # 앱 코드
       - ./uploads:/app/uploads
       - ./data:/app/data
+    restart: unless-stopped
+
+  sqlite_web:
+    container_name: sqlite_web
+    image: coleifer/sqlite-web:latest
+    # sqlite_web을 0.0.0.0:8080에서 실행, 앱과 동일한 DB 파일(/data/naiz.db)을 엶
+    command: sqlite_web -H 0.0.0.0 -p 8080 /data/naiz.db
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./data:/data          # host의 ./data를 컨테이너 /data로 마운트
+    depends_on:
+      - techsupport_app
+    restart: unless-stopped

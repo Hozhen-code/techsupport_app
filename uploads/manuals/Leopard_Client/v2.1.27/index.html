@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+
+<html lang="ko" xml:lang="ko">
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+
+<meta name="author" content="NAIZ" />
+
+<meta name="date" content="2025-09-22" />
+
+<title>Leopard Client 사용자 매뉴얼 (v2.1.27)</title>
+
+<script src="site_libs/header-attrs-2.29/header-attrs.js"></script>
+<script src="site_libs/jquery-3.6.0/jquery-3.6.0.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="site_libs/bootstrap-3.3.5/css/cosmo.min.css" rel="stylesheet" />
+<script src="site_libs/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/respond.min.js"></script>
+<style>h1 {font-size: 34px;}
+       h1.title {font-size: 38px;}
+       h2 {font-size: 30px;}
+       h3 {font-size: 24px;}
+       h4 {font-size: 18px;}
+       h5 {font-size: 16px;}
+       h6 {font-size: 12px;}
+       code {color: inherit; background-color: rgba(0, 0, 0, 0.04);}
+       pre:not([class]) { background-color: white }</style>
+<script src="site_libs/jqueryui-1.13.2/jquery-ui.min.js"></script>
+<link href="site_libs/tocify-1.9.1/jquery.tocify.css" rel="stylesheet" />
+<script src="site_libs/tocify-1.9.1/jquery.tocify.js"></script>
+<script src="site_libs/navigation-1.1/tabsets.js"></script>
+<link href="site_libs/pagedtable-1.1/css/pagedtable.css" rel="stylesheet" />
+<script src="site_libs/pagedtable-1.1/js/pagedtable.js"></script>
+
+<style type="text/css">
+  code{white-space: pre-wrap;}
+  span.smallcaps{font-variant: small-caps;}
+  span.underline{text-decoration: underline;}
+  div.column{display: inline-block; vertical-align: top; width: 50%;}
+  div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+  ul.task-list{list-style: none;}
+    </style>
+
+
+
+
+
+
+
+
+
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+img {
+  max-width:100%;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+.html-widget {
+  margin-bottom: 20px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+summary {
+  display: list-item;
+}
+details > summary > p:only-child {
+  display: inline;
+}
+pre code {
+  padding: 0;
+}
+</style>
+
+
+
+<!-- tabsets -->
+
+<style type="text/css">
+.tabset-dropdown > .nav-tabs {
+  display: inline-table;
+  max-height: 500px;
+  min-height: 44px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.tabset-dropdown > .nav-tabs > li.active:before, .tabset-dropdown > .nav-tabs.nav-tabs-open:before {
+  content: "\e259";
+  font-family: 'Glyphicons Halflings';
+  display: inline-block;
+  padding: 10px;
+  border-right: 1px solid #ddd;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open > li.active:before {
+  content: "\e258";
+  font-family: 'Glyphicons Halflings';
+  border: none;
+}
+
+.tabset-dropdown > .nav-tabs > li.active {
+  display: block;
+}
+
+.tabset-dropdown > .nav-tabs > li > a,
+.tabset-dropdown > .nav-tabs > li > a:focus,
+.tabset-dropdown > .nav-tabs > li > a:hover {
+  border: none;
+  display: inline-block;
+  border-radius: 4px;
+  background-color: transparent;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open > li {
+  display: block;
+  float: none;
+}
+
+.tabset-dropdown > .nav-tabs > li {
+  display: none;
+}
+</style>
+
+<!-- code folding -->
+
+
+
+<style type="text/css">
+
+#TOC {
+  margin: 25px 0px 20px 0px;
+}
+@media (max-width: 768px) {
+#TOC {
+  position: relative;
+  width: 100%;
+}
+}
+
+@media print {
+.toc-content {
+  /* see https://github.com/w3c/csswg-drafts/issues/4434 */
+  float: right;
+}
+}
+
+.toc-content {
+  padding-left: 30px;
+  padding-right: 40px;
+}
+
+div.main-container {
+  max-width: 1200px;
+}
+
+div.tocify {
+  width: 20%;
+  max-width: 260px;
+  max-height: 85%;
+}
+
+@media (min-width: 768px) and (max-width: 991px) {
+  div.tocify {
+    width: 25%;
+  }
+}
+
+@media (max-width: 767px) {
+  div.tocify {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+.tocify ul, .tocify li {
+  line-height: 20px;
+}
+
+.tocify-subheader .tocify-item {
+  font-size: 0.90em;
+}
+
+.tocify .list-group-item {
+  border-radius: 0px;
+}
+
+
+</style>
+
+
+
+</head>
+
+<body>
+
+
+<div class="container-fluid main-container">
+
+
+<!-- setup 3col/9col grid for toc_float and main content  -->
+<div class="row">
+<div class="col-xs-12 col-sm-4 col-md-3">
+<div id="TOC" class="tocify">
+</div>
+</div>
+
+<div class="toc-content col-xs-12 col-sm-8 col-md-9">
+
+
+
+
+<div id="header">
+
+
+
+<h1 class="title toc-ignore">Leopard Client 사용자 매뉴얼 (v2.1.27)</h1>
+<h4 class="author">NAIZ</h4>
+<h4 class="date">2025-09-22</h4>
+
+</div>
+
+
+<div id="leopard-client-사용자-매뉴얼-버전-2.1.27_v2309"
+class="section level1" number="1">
+<h1><span class="header-section-number">1</span> Leopard Client 사용자
+매뉴얼 (버전 2.1.27)_v2309</h1>
+<blockquote>
+<p>기술문의 E-mail: <strong><a href="mailto:naiz@naiz.co.kr"
+class="email">naiz@naiz.co.kr</a></strong><br />
+본 문서는 Leopard Client v2.1.27.x 기준 사용자 매뉴얼의 Markdown
+변환본입니다. (이미지, 도식은 텍스트 지시로 대체)</p>
+</blockquote>
+<hr />
+<!-- 고정 목차(우/좌측) + 현재 위치 강조(ScrollSpy) -->
+<style>
+  /* 레이아웃 */
+  body { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  #toc {
+    position: fixed;
+    top: 80px;
+    right: 16px;           /* 좌측 고정으로 바꾸려면: left:16px; right:auto; */
+    width: 260px;
+    max-height: 70vh;
+    overflow: auto;
+    padding: 12px 12px 12px 8px;
+    border-left: 1px solid #e5e7eb;
+    font-size: 14px;
+    line-height: 1.5;
+    background: #fff;
+  }
+  #toc h2 { margin: 0 0 8px; font-size: 14px; font-weight: 700; }
+  #toc ul { list-style: none; padding-left: 10px; margin: 0; }
+  #toc a { text-decoration: none; color: #374151; }
+  #toc a:hover { text-decoration: underline; }
+  #toc a.active { font-weight: 700; color: #111827; }
+  .toc-l2 { margin-left: 8px; }
+  .toc-l3 { margin-left: 16px; }
+
+  /* 본문 가독성 */
+  main { max-width: 760px; }
+  main img { max-width: 100%; }
+  pre, code { white-space: pre-wrap; }
+  blockquote { border-left: 4px solid #e5e7eb; margin: 0; padding: 8px 12px; color: #374151; background: #fafafa; }
+
+  /* 작은 화면에서는 TOC 숨김 */
+  @media (max-width: 1100px) {
+    #toc { display: none; }
+    body { padding-right: 16px; }
+  }
+</style>
+<nav id="toc">
+<h2>
+목차
+</h2>
+<div>
+자동 생성 중…
+</div>
+</nav>
+<script>
+(function() {
+  function slugify(text) {
+    // 간단한 slug 생성기: 공백->-, 특수문자 제거, 한글/유니코드는 encodeURIComponent 사용
+    const base = text.trim().toLowerCase();
+    const rough = base.replace(/[^\w\u00C0-\uFFFF\- ]+/g, '').replace(/\s+/g, '-');
+    // 한글/비ASCII 안전 처리
+    return encodeURIComponent(rough);
+  }
+
+  const headers = Array.from(document.querySelectorAll("h1, h2, h3"));
+  headers.forEach(h => {
+    if (!h.id) h.id = slugify(h.textContent);
+  });
+
+  // TOC 빌드 (h2, h3만)
+  const tocRoot = document.getElementById('toc');
+  const existing = tocRoot.querySelector('div');
+  if (existing) existing.remove();
+
+  const ul = document.createElement('ul');
+  let lastH2Ul = null;
+
+  headers.forEach(h => {
+    const level = Number(h.tagName.substring(1));
+    if (level < 2 || level > 3) return; // h2, h3만
+
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.textContent = h.textContent;
+    a.className = level === 2 ? 'toc-l2' : 'toc-l3';
+    li.appendChild(a);
+
+    if (level === 2) {
+      ul.appendChild(li);
+      lastH2Ul = ul;
+    } else if (level === 3) {
+      ul.appendChild(li);
+    }
+  });
+
+  tocRoot.appendChild(ul);
+
+  // ScrollSpy
+  const tocLinks = Array.from(tocRoot.querySelectorAll('a'));
+  const map = new Map(tocLinks.map(a => [a.getAttribute('href').slice(1), a]));
+  const targetHeaders = Array.from(document.querySelectorAll('h2, h3'));
+
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.id;
+        tocLinks.forEach(a => a.classList.remove('active'));
+        const link = map.get(id);
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '0px 0px -70% 0px', threshold: 0.1 });
+
+  targetHeaders.forEach(h => obs.observe(h));
+})();
+</script>
+<main>
+<div id="개정-이력" class="section level2" number="1.1">
+<h2><span class="header-section-number">1.1</span> 개정 이력</h2>
+<table>
+<thead>
+<tr class="header">
+<th align="center">개정 번호</th>
+<th align="center">제·개정일자</th>
+<th align="left">제·개정 내용</th>
+<th align="left">작성자</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="center">1.0</td>
+<td align="center">2019.07</td>
+<td align="left">최초 작성</td>
+<td align="left"></td>
+</tr>
+<tr class="even">
+<td align="center">1.2</td>
+<td align="center">2020.02</td>
+<td align="left">전체화면 시계표시</td>
+<td align="left"></td>
+</tr>
+<tr class="odd">
+<td align="center">1.3</td>
+<td align="center">2023.02</td>
+<td align="left">최신화</td>
+<td align="left"></td>
+</tr>
+<tr class="even">
+<td align="center">1.4</td>
+<td align="center">2023.09</td>
+<td align="left">2.1.27.x 최신화</td>
+<td align="left"></td>
+</tr>
+</tbody>
+</table>
+<hr />
+</div>
+<div id="개요" class="section level2" number="1.2">
+<h2><span class="header-section-number">1.2</span> 1. 개요</h2>
+<div id="소개" class="section level3" number="1.2.1">
+<h3><span class="header-section-number">1.2.1</span> 1.1 소개</h3>
+<p>Leopard Client는 저장장치와 통신하여 <strong>영상 관제</strong>를
+목적으로 사용합니다. - 데이터베이스와 통신하여 접속된 모든 영상을 관제 -
+소규모부터 중·대형급까지 제한 없이 관제 가능 - 카메라 제어 - 녹화 영상
+검색 및 백업</p>
+</div>
+<div id="주요-특징" class="section level3" number="1.2.2">
+<h3><span class="header-section-number">1.2.2</span> 1.2 주요 특징</h3>
+<ul>
+<li>저장분배서버를 통한 실시간 영상 모니터링</li>
+<li>소규모~중·대형급 모니터링</li>
+<li>Leopard 장비의 편리한 접속</li>
+<li>실시간 모니터링 및 PTZ 카메라 원격 제어</li>
+<li>그래픽/사운드 알림으로 장애 시 관리자 인식률 상승</li>
+<li>USB형 조이스틱 지원</li>
+<li>Leopard 저장장치 녹화 영상의 검색/재생</li>
+<li>다양한 분할 화면 모드 및 사용자 분할 화면</li>
+<li>듀얼 라이브화면</li>
+<li>순차 전환이 가능한 분할 화면 모니터링</li>
+<li>즐겨찾기 채널/화면 구성을 그룹으로 관리</li>
+<li>다양한 알람 입력 연동 및 자동 알람 이벤트 처리</li>
+<li>이벤트 발생 시 팝업/알람음/경광등 연동</li>
+<li>백업 가능(뷰어 내장/AVI)</li>
+<li>편리한 단축키 제공</li>
+<li>동시 재생 화면 동기화</li>
+<li>듀얼 스트리밍으로 효율적인 성능 관리</li>
+<li>오디오 방송(채널·그룹별 스케줄)</li>
+<li>H.264/H.265, 16/32채널 실시간 영상 표출</li>
+<li>ONVIF, RTSP 프로토콜 지원</li>
+<li>접속한 VMS/NVR 영상의 실시간 통합 관제/제어</li>
+<li>CPU/Memory/Network 사용량 모니터링</li>
+</ul>
+</div>
+<div id="시스템-다이어그램" class="section level3" number="1.2.3">
+<h3><span class="header-section-number">1.2.3</span> 1.3 시스템
+다이어그램</h3>
+<ul>
+<li><strong>NVR 구성</strong> (도식 참조)</li>
+<li><strong>VMS 구성</strong> (도식 참조)</li>
+</ul>
+<hr />
+</div>
+</div>
+<div id="설치하기" class="section level2" number="1.3">
+<h2><span class="header-section-number">1.3</span> 2. 설치하기</h2>
+<div id="프로그램-설치" class="section level3" number="1.3.1">
+<h3><span class="header-section-number">1.3.1</span> 2.1 프로그램
+설치</h3>
+<ol style="list-style-type: decimal">
+<li>설치 프로그램 <code>Leopard_Client_x64_Install_v2.1.xxxx</code>
+실행</li>
+<li>설치 경로 선택 → <strong>다음(N)</strong></li>
+<li>시작 메뉴 폴더명 입력(기본 <strong>Leopard</strong>) →
+<strong>다음(N)</strong></li>
+<li>바탕화면 바로가기 생성 여부 선택 → <strong>다음(N)</strong></li>
+<li><strong>설치(I)</strong> 클릭하여 설치 진행</li>
+<li>완료 후 <strong>종료(F)</strong>. “Client 실행” 체크 시 곧바로
+실행</li>
+</ol>
+<blockquote>
+<p>(그림: 설치 마법사 화면들)</p>
+</blockquote>
+</div>
+<div id="실행하기" class="section level3" number="1.3.2">
+<h3><span class="header-section-number">1.3.2</span> 2.2 실행하기</h3>
+<ul>
+<li>바탕화면 아이콘 실행 (Client PC 구동 시 자동 실행 가능)</li>
+</ul>
+</div>
+<div id="인증키-삽입" class="section level3" number="1.3.3">
+<h3><span class="header-section-number">1.3.3</span> 2.3 인증키
+삽입</h3>
+<ul>
+<li>동봉된 <strong>USB 인증키</strong>를 PC USB 포트에 삽입해야 정상
+동작</li>
+<li>인식 실패 시 프로그램 재시작 후 확인</li>
+<li>인증 실패 시 전자키 등록 메뉴/안내 팝업 확인</li>
+</ul>
+</div>
+<div id="비밀-번호-입력" class="section level3" number="1.3.4">
+<h3><span class="header-section-number">1.3.4</span> 2.4 비밀 번호
+입력</h3>
+<ul>
+<li>비밀번호 및 서버 주소 입력(기본 비밀번호 <code>admin</code>,
+<strong>사용 전 반드시 변경 권장</strong>)</li>
+<li>서버 주소
+<ul>
+<li>VMS: 관리서버 IP</li>
+<li>NVR: NVR IP</li>
+</ul></li>
+</ul>
+</div>
+<div id="데이터베이스-접속-실패-조치사항" class="section level3"
+number="1.3.5">
+<h3><span class="header-section-number">1.3.5</span> 2.5 데이터베이스
+접속 실패 조치사항</h3>
+<ul>
+<li>연결 실패 팝업 시 <strong>예(Y)</strong> 선택 → DB 입력 창
+<ul>
+<li>주소: 관리서버/NVR IP</li>
+<li>포트: 기본 <code>3306</code></li>
+<li>아이디: 기본 <code>root</code></li>
+<li>패스워드: DB 설치 시 설정 값</li>
+</ul></li>
+</ul>
+<hr />
+</div>
+</div>
+<div id="화면-구성-및-기능" class="section level2" number="1.4">
+<h2><span class="header-section-number">1.4</span> 3. 화면 구성 및
+기능</h2>
+<div id="라이브-화면" class="section level3" number="1.4.1">
+<h3><span class="header-section-number">1.4.1</span> 3.1 라이브
+화면</h3>
+<ol style="list-style-type: decimal">
+<li><strong>툴바</strong>: 라이브/재생/설정/상태 등 기능 선택</li>
+<li><strong>상태 표시창</strong>: 하드웨어 사용량 실시간 표시</li>
+<li><strong>환경설정 및 정보</strong></li>
+<li><strong>제어 패널</strong>: 장치 목록, PTZ, 순차표출, 사용자
+레이아웃, 이벤트 리스트</li>
+<li><strong>뷰 화면</strong>: 영상 분할 상태 지정</li>
+<li><strong>라이브 컨트롤</strong>: 디지털 줌, PTZ, 오디오, 캡처, 북마크
+등</li>
+<li><strong>화면 분할</strong>: 분할 상태 지정</li>
+</ol>
+</div>
+<div id="재생-화면" class="section level3" number="1.4.2">
+<h3><span class="header-section-number">1.4.2</span> 3.2 재생 화면</h3>
+<ol style="list-style-type: decimal">
+<li>툴바(기능 선택)</li>
+<li>카메라 선택 창(장치 목록)</li>
+<li>재생 화면 창(1/4/9/16 분할)</li>
+<li>연·월 선택</li>
+<li>시·분 선택</li>
+<li>재생 컨트롤(정/역·일시정지·속도 등)</li>
+<li>간편 조작/분할 바(디지털줌/오디오/북마크/캡처)</li>
+</ol>
+<hr />
+</div>
+</div>
+<div id="카메라-모니터링" class="section level2" number="1.5">
+<h2><span class="header-section-number">1.5</span> 4. 카메라
+모니터링</h2>
+<ul>
+<li>라이브 아이콘 선택 → 실시간 모니터링 화면</li>
+</ul>
+<div id="실시간-영상-보기" class="section level3" number="1.5.1">
+<h3><span class="header-section-number">1.5.1</span> 4.1 실시간 영상
+보기</h3>
+<ul>
+<li>장치 목록의 카메라/그룹을 라이브 화면으로
+<strong>드래그</strong></li>
+<li>장치/그룹에서 <strong>마우스 오른쪽 → 카메라 연결/그룹
+연결</strong></li>
+</ul>
+</div>
+<div id="실시간-영상-끊기" class="section level3" number="1.5.2">
+<h3><span class="header-section-number">1.5.2</span> 4.2 실시간 영상
+끊기</h3>
+<ul>
+<li>선택 창 우클릭 → 카메라 끊기</li>
+<li>전체 끊기 / 탭 끊기 / 카메라 끊기</li>
+</ul>
+</div>
+<div id="ptz-카메라-제어하기" class="section level3" number="1.5.3">
+<h3><span class="header-section-number">1.5.3</span> 4.3 PTZ 카메라
+제어하기</h3>
+<ul>
+<li>라이브 화면 우측 상단에 “P” 표시된 카메라만 제어 가능</li>
+<li><strong>PTZ 컨트롤</strong>:
+<ul>
+<li>8방향 제어</li>
+<li>렌즈 제어(Zoom, Focus)</li>
+<li>AUX 제어</li>
+<li>속도 슬라이더</li>
+<li>프리셋 저장/호출, 프리셋 투어(선택 채널/전체)</li>
+</ul></li>
+</ul>
+</div>
+<div id="순차표출-사용하기" class="section level3" number="1.5.4">
+<h3><span class="header-section-number">1.5.4</span> 4.4 순차표출
+사용하기</h3>
+<ul>
+<li>종류
+<ul>
+<li>생성된 순차표출 시작(탭 기반)</li>
+<li><strong>그룹 내</strong> 순차표출 시작</li>
+<li><strong>레이아웃 내</strong> 순차표출 시작</li>
+</ul></li>
+<li>화면 전환 시간: <strong>환경설정 → 화면설정 → 순차표출</strong></li>
+</ul>
+<div id="그룹-내에서-순차표출" class="section level4" number="1.5.4.1">
+<h4><span class="header-section-number">1.5.4.1</span> 4.4.1 그룹 내에서
+순차표출</h4>
+<ul>
+<li>카메라 그룹/Live 화면에서 우클릭 → 원하는 순차표출</li>
+</ul>
+</div>
+<div id="순차표출-추가-및-수정" class="section level4" number="1.5.4.2">
+<h4><span class="header-section-number">1.5.4.2</span> 4.4.2 순차표출
+추가 및 수정</h4>
+<ul>
+<li>좌측 리스트 <strong>순차표출</strong> 메뉴 우클릭 →
+<strong>추가</strong></li>
+<li>이름/종류(카메라 그룹 또는 사용자 레이아웃)/전환 대기시간/분할
+레이아웃 지정</li>
+<li>리스트 항목 우클릭 → <strong>추가/수정</strong></li>
+</ul>
+</div>
+<div id="순차표출-시작-및-종료" class="section level4" number="1.5.4.3">
+<h4><span class="header-section-number">1.5.4.3</span> 4.4.3 순차표출
+시작 및 종료</h4>
+<ul>
+<li>리스트 항목 우클릭 → <strong>순차표출 시작</strong></li>
+<li>종료: 해당 항목 우클릭 → <strong>순차 표출 종료</strong></li>
+<li>삭제: 항목 우클릭 → <strong>삭제</strong></li>
+</ul>
+</div>
+</div>
+<div id="사용자-레이아웃" class="section level3" number="1.5.5">
+<h3><span class="header-section-number">1.5.5</span> 4.5 사용자
+레이아웃</h3>
+<ol style="list-style-type: decimal">
+<li><strong>추가</strong>: 현재 분할 상태를 레이아웃으로 저장</li>
+<li><strong>수정</strong>: 이름 수정/현재 레이아웃으로 업데이트</li>
+<li><strong>삭제</strong></li>
+<li><strong>레이아웃 보드</strong> 표시/숨기기/설정(텍스트 표출
+공간)</li>
+</ol>
+</div>
+<div id="이벤트-리스트" class="section level3" number="1.5.6">
+<h3><span class="header-section-number">1.5.6</span> 4.6 이벤트
+리스트</h3>
+<ul>
+<li>실시간 이벤트 모니터링</li>
+<li>이벤트 리스트 우클릭 메뉴:
+<ol style="list-style-type: decimal">
+<li>라이브 팝업</li>
+<li>재생 전환</li>
+<li>이벤트 팝업 재생</li>
+<li>옵션(이벤트 종류 선택)</li>
+</ol></li>
+<li>재생 중 카메라 필터링 기능</li>
+</ul>
+</div>
+<div id="화면-분할-사용하기" class="section level3" number="1.5.7">
+<h3><span class="header-section-number">1.5.7</span> 4.7 화면 분할
+사용하기</h3>
+<div id="전체-화면" class="section level4" number="1.5.7.1">
+<h4><span class="header-section-number">1.5.7.1</span> 4.7.1 전체
+화면</h4>
+<ul>
+<li>전체화면 아이콘 → <strong>Esc</strong>로 해제</li>
+</ul>
+</div>
+<div id="화면-분할" class="section level4" number="1.5.7.2">
+<h4><span class="header-section-number">1.5.7.2</span> 4.7.2 화면
+분할</h4>
+<ul>
+<li><strong>대칭형</strong>: 4/9/16/25/36/49/64분할(7종)</li>
+<li><strong>비대칭형</strong>:
+6A/12A/6B/8/12/7/12B/13A/13B/20/24(11종)</li>
+<li><strong>사용자 분할 화면</strong> 지원</li>
+</ul>
+</div>
+<div id="화면-전환" class="section level4" number="1.5.7.3">
+<h4><span class="header-section-number">1.5.7.3</span> 4.7.3 화면
+전환</h4>
+<ul>
+<li>예: 등록 16대, 4분할 → 페이지 라벨(1/N) 클릭 시 네비게이션 컨트롤
+팝업 → 레이아웃 이동</li>
+</ul>
+</div>
+</div>
+<div id="라이브-컨트롤" class="section level3" number="1.5.8">
+<h3><span class="header-section-number">1.5.8</span> 4.8 라이브
+컨트롤</h3>
+<div id="디지털-줌" class="section level4" number="1.5.8.1">
+<h4><span class="header-section-number">1.5.8.1</span> 4.8.1 디지털
+줌</h4>
+<ul>
+<li>카메라 선택 → (디지털 줌) 버튼 → 영역 지정/확대, 더블클릭 또는
+아이콘으로 해제</li>
+</ul>
+</div>
+<div id="ptz-제어" class="section level4" number="1.5.8.2">
+<h4><span class="header-section-number">1.5.8.2</span> 4.8.2 PTZ
+제어</h4>
+<ul>
+<li>(PTZ) 버튼 → Pan/Tilt/Zoom 제어 (속도 1~10)</li>
+</ul>
+</div>
+<div id="오디오-수신" class="section level4" number="1.5.8.3">
+<h4><span class="header-section-number">1.5.8.3</span> 4.8.3 오디오
+수신</h4>
+<ul>
+<li>카메라 선택 후 (오디오 수신) 버튼</li>
+</ul>
+</div>
+<div id="오디오-송신" class="section level4" number="1.5.8.4">
+<h4><span class="header-section-number">1.5.8.4</span> 4.8.4 오디오
+송신</h4>
+<ul>
+<li>카메라 선택 후 (오디오 송신) 버튼 → 마이크 입력</li>
+</ul>
+</div>
+<div id="화면-캡쳐" class="section level4" number="1.5.8.5">
+<h4><span class="header-section-number">1.5.8.5</span> 4.8.5 화면
+캡쳐</h4>
+<ul>
+<li>라이브/검색 화면에서 (화면 캡쳐)</li>
+</ul>
+</div>
+<div id="북마크-입력" class="section level4" number="1.5.8.6">
+<h4><span class="header-section-number">1.5.8.6</span> 4.8.6 북마크
+입력</h4>
+<ul>
+<li>(북마크) 버튼 → 메모 입력 → 녹화영상에 저장 → 검색/재생 가능</li>
+</ul>
+</div>
+<div id="상태-표시창" class="section level4" number="1.5.8.7">
+<h4><span class="header-section-number">1.5.8.7</span> 4.8.7 상태
+표시창</h4>
+<ul>
+<li>CPU(%), Memory(GB), Network(Mbps) 사용량 실시간 표시</li>
+</ul>
+</div>
+<div id="라이브-영상-우클릭-메뉴" class="section level4"
+number="1.5.8.8">
+<h4><span class="header-section-number">1.5.8.8</span> 4.8.8 라이브 영상
+우클릭 메뉴</h4>
+<ul>
+<li>전체/탭/카메라 끊기</li>
+<li>순차표출</li>
+<li>백업</li>
+<li>화면 캡쳐</li>
+<li>북마크 추가</li>
+<li>PTZ 설정</li>
+<li>영상 비율 맞춤</li>
+<li>모션 설정(감지 영역)</li>
+<li>웹 페이지 열기(카메라)</li>
+<li>Ping 테스트(네트워크 상태)</li>
+<li>카메라 정보(복사 가능)</li>
+<li>전체 화면</li>
+</ul>
+<hr />
+</div>
+</div>
+</div>
+<div id="녹화-영상-검색-및-재생하기" class="section level2"
+number="1.6">
+<h2><span class="header-section-number">1.6</span> 5. 녹화 영상 검색 및
+재생하기</h2>
+<ul>
+<li>저장분배서버/NVR 녹화 영상 <strong>검색/재생</strong> (권한
+필요)</li>
+</ul>
+<div id="검색" class="section level3" number="1.6.1">
+<h3><span class="header-section-number">1.6.1</span> 5.1 검색</h3>
+<div id="달력으로-검색하기" class="section level4" number="1.6.1.1">
+<h4><span class="header-section-number">1.6.1.1</span> 5.1.1 달력으로
+검색하기</h4>
+<ol style="list-style-type: decimal">
+<li>카메라를 재생 창으로 드래그 또는 우클릭 <strong>카메라
+연결</strong></li>
+<li>달력 패널에서 날짜 선택</li>
+<li>하단 시간 슬라이더로 시/분 선택</li>
+</ol>
+</div>
+<div id="이벤트로-검색하기" class="section level4" number="1.6.1.2">
+<h4><span class="header-section-number">1.6.1.2</span> 5.1.2 이벤트로
+검색하기</h4>
+<ul>
+<li>이벤트 검색 패널 활성화 → 이벤트 리스트에서 선택 → 더블클릭으로
+재생화면 배치</li>
+<li><strong>검색 옵션</strong> 선택 후 불러오기 → 재생</li>
+</ul>
+</div>
+<div id="북마크-검색삭제" class="section level4" number="1.6.1.3">
+<h4><span class="header-section-number">1.6.1.3</span> 5.1.3 북마크
+검색/삭제</h4>
+<ul>
+<li>기간(시작~끝) 지정 → 불러오기 → 리스트에서 재생</li>
+<li>삭제: 리스트 항목 우클릭 → <strong>삭제</strong></li>
+</ul>
+</div>
+<div id="파노라마로-검색하기" class="section level4" number="1.6.1.4">
+<h4><span class="header-section-number">1.6.1.4</span> 5.1.4 파노라마로
+검색하기</h4>
+<ul>
+<li>카메라와 시간대 선택 → <strong>파노라마 버튼</strong> → 16분할
+표출</li>
+<li>간격(1장~10분) 선택 후 화살표로 탐색</li>
+<li><strong>움직임 감지</strong> 사용 시 움직임 발생 구간만 검색</li>
+</ul>
+</div>
+</div>
+<div id="재생" class="section level3" number="1.6.2">
+<h3><span class="header-section-number">1.6.2</span> 5.2 재생</h3>
+<div id="카메라-선택-및-선택-취소" class="section level4"
+number="1.6.2.1">
+<h4><span class="header-section-number">1.6.2.1</span> 5.2.1 카메라 선택
+및 선택 취소</h4>
+<ul>
+<li>분할 선택(1/4/9/16)</li>
+<li>장치목록에서 드래그/더블클릭으로 배치 (동시 최대 16대)</li>
+<li>취소: 장치목록 우클릭 <strong>카메라 끊기</strong> 또는 더블클릭 /
+화면에서 우클릭 <strong>카메라 끊기</strong></li>
+</ul>
+</div>
+<div id="재생하기" class="section level4" number="1.6.2.2">
+<h4><span class="header-section-number">1.6.2.2</span> 5.2.2
+재생하기</h4>
+<ul>
+<li>재생 버튼</li>
+<li>속도: 0.5×, 1~8×, 16×, 32×</li>
+<li>스텝 재생: 1장, 1초~10분(총 11단위)</li>
+<li>시간 표시: 년/월/일/시/분/초/1/1000초 (동시 재생 동기화)</li>
+</ul>
+</div>
+</div>
+<div id="백업" class="section level3" number="1.6.3">
+<h3><span class="header-section-number">1.6.3</span> 5.3 백업</h3>
+<ul>
+<li>권한 필요, <strong>뷰어 내장 백업</strong> / <strong>AVI 파일
+백업</strong> 지원</li>
+</ul>
+<div id="백업-설정" class="section level4" number="1.6.3.1">
+<h4><span class="header-section-number">1.6.3.1</span> 5.3.1 백업
+설정</h4>
+<ul>
+<li>마우스 우측클릭 → <strong>백업</strong></li>
+<li>날짜/시간: (1) 시작~끝, (2) 시작으로부터 기간(일/시/분/초)</li>
+<li>백업 타입: AVI / 뷰어 내장</li>
+<li>파일명(저장 경로), <strong>이름 폴더 생성</strong> 옵션</li>
+<li>뷰어 내장 백업: <strong>비밀번호</strong> 설정 가능</li>
+</ul>
+</div>
+<div id="백업-영상-검색" class="section level4" number="1.6.3.2">
+<h4><span class="header-section-number">1.6.3.2</span> 5.3.2 백업 영상
+검색</h4>
+<ul>
+<li>생성된 백업 파일 더블클릭 → <strong>Backup Viewer</strong> 실행</li>
+<li>비밀번호 설정 시 인증 창 선행</li>
+</ul>
+</div>
+<div id="백업-영상-재생" class="section level4" number="1.6.3.3">
+<h4><span class="header-section-number">1.6.3.3</span> 5.3.3 백업 영상
+재생</h4>
+<ul>
+<li>검색/재생 화면 조작 방식과 유사</li>
+<li>배속 재생 시 모든 프레임 재생</li>
+<li>타임바 클릭 시 해당 구간으로 이동</li>
+</ul>
+<hr />
+</div>
+</div>
+</div>
+<div id="설정" class="section level2" number="1.7">
+<h2><span class="header-section-number">1.7</span> 6. 설정</h2>
+<ul>
+<li>관리서버/NVR 접속 후 카메라/그룹 운영·관리</li>
+<li>가져오기: <strong>admin(기본)</strong> 또는 <strong>사용자
+선택</strong></li>
+</ul>
+<div id="설정-화면" class="section level3" number="1.7.1">
+<h3><span class="header-section-number">1.7.1</span> 6.1 설정 화면</h3>
+<ul>
+<li>툴바 → <strong>설정</strong> 아이콘</li>
+</ul>
+</div>
+<div id="ptz-카메라-설정" class="section level3" number="1.7.2">
+<h3><span class="header-section-number">1.7.2</span> 6.2 PTZ 카메라
+설정</h3>
+<ul>
+<li>설정 → <strong>PTZ</strong></li>
+<li>카메라 선택, 프리셋 추가/수정/삭제</li>
+<li>홈 프리셋(무입력 시간 경과 시 이동)</li>
+<li>프리셋 투어(번호/지속시간)</li>
+</ul>
+</div>
+<div id="이벤트-설정" class="section level3" number="1.7.3">
+<h3><span class="header-section-number">1.7.3</span> 6.3 이벤트
+설정</h3>
+<ul>
+<li><strong>입력/동작/맵</strong> 3가지를 모두 설정해야 정상 동작</li>
+</ul>
+<div id="이벤트-설정입력" class="section level4" number="1.7.3.1">
+<h4><span class="header-section-number">1.7.3.1</span> 6.3.1 이벤트
+설정(입력)</h4>
+<ul>
+<li>리스트/메뉴(추가·수정·삭제·모두 삭제)/필터</li>
+</ul>
+</div>
+<div id="이벤트-입력" class="section level4" number="1.7.3.2">
+<h4><span class="header-section-number">1.7.3.2</span> 6.3.2 이벤트
+입력</h4>
+<ul>
+<li><strong>추가</strong> → 이벤트 이름 → 이벤트 종류(예: Camera) →
+카메라 선택(단일/전체) → 체크 후 <strong>추가</strong></li>
+</ul>
+</div>
+<div id="이벤트-수정" class="section level4" number="1.7.3.3">
+<h4><span class="header-section-number">1.7.3.3</span> 6.3.3 이벤트
+수정</h4>
+<ul>
+<li>항목 선택 → <strong>수정</strong> → 값 변경 후 저장</li>
+</ul>
+</div>
+<div id="이벤트-삭제-및-모두-삭제" class="section level4"
+number="1.7.3.4">
+<h4><span class="header-section-number">1.7.3.4</span> 6.3.4 이벤트 삭제
+및 모두 삭제</h4>
+<ul>
+<li>항목 <strong>삭제</strong>, 전체 <strong>모두
+삭제</strong>(재확인)</li>
+</ul>
+</div>
+<div id="이벤트-동작" class="section level4" number="1.7.3.5">
+<h4><span class="header-section-number">1.7.3.5</span> 6.3.5 이벤트
+동작</h4>
+<ul>
+<li><strong>추가</strong> → 이벤트 이름 → 동작 종류 선택 → 클라이언트
+IP/포트 → <strong>추가</strong></li>
+</ul>
+</div>
+<div id="이벤트-동작-popup" class="section level4" number="1.7.3.6">
+<h4><span class="header-section-number">1.7.3.6</span> 6.3.6 이벤트
+동작: Popup</h4>
+<ul>
+<li>팝업 화면: 1x1 또는 2x2</li>
+<li>카메라 선택(1x1: 1대, 2x2: 최대 4대)</li>
+<li>새 팝업 윈도우 / 최상위 / 자동 닫힘 / 닫힘 시 프리셋 이동 / 저해상도
+사용</li>
+</ul>
+</div>
+<div id="이벤트-동작-alarmsound" class="section level4"
+number="1.7.3.7">
+<h4><span class="header-section-number">1.7.3.7</span> 6.3.7 이벤트
+동작: AlarmSound</h4>
+<ul>
+<li>WAV 파일 선택</li>
+<li>알람팝업 반복 / 반복시간 / 반복 시간 값</li>
+<li>이벤트 발생 장치 선택</li>
+</ul>
+</div>
+<div id="이벤트-동작-preset" class="section level4" number="1.7.3.8">
+<h4><span class="header-section-number">1.7.3.8</span> 6.3.8 이벤트
+동작: Preset</h4>
+<ul>
+<li>카메라 선택, 프리셋 번호, 투어 종료 옵션</li>
+</ul>
+</div>
+<div id="이벤트-동작-enableaudio" class="section level4"
+number="1.7.3.9">
+<h4><span class="header-section-number">1.7.3.9</span> 6.3.9 이벤트
+동작: EnableAudio</h4>
+<ul>
+<li>카메라 선택</li>
+<li>마이크(말하기) / 스피커(듣기)</li>
+</ul>
+</div>
+<div id="이벤트-동작-forcedrecording" class="section level4"
+number="1.7.3.10">
+<h4><span class="header-section-number">1.7.3.10</span> 6.3.10 이벤트
+동작: ForcedRecording</h4>
+<ul>
+<li>클라이언트 정보</li>
+<li>카메라 선택</li>
+<li>녹화 타입: <strong>시간</strong>(이벤트 후 설정 시간 녹화) /
+<strong>이벤트</strong>(최대 녹화 시간)</li>
+</ul>
+</div>
+<div id="이벤트-동작-mobilenotification" class="section level4"
+number="1.7.3.11">
+<h4><span class="header-section-number">1.7.3.11</span> 6.3.11 이벤트
+동작: MobileNotification</h4>
+<ul>
+<li>이벤트 종류 선택</li>
+<li>모바일 <strong>Magpie 앱</strong>으로 알림 전송</li>
+</ul>
+</div>
+<div id="이벤트-동작-alarm-output-device" class="section level4"
+number="1.7.3.12">
+<h4><span class="header-section-number">1.7.3.12</span> 6.3.12 이벤트
+동작: Alarm Output Device</h4>
+<ul>
+<li><strong>카메라 장치</strong> 또는 <strong>ET0808</strong></li>
+</ul>
+<p><strong>카메라 장치</strong> - 모델명/카메라
+선택/타입(Toggle/Trigger)/유지 시간/팝업 닫을 때 종료</p>
+<p><strong>ET0808</strong> - IP(기본 192.168.1.2)/포트(기본 80)/ID(기본
+root)/PW(기본 pass) - 출력 번호 1~8 - 타입(Toggle/Trigger), 유지
+시간</p>
+</div>
+<div id="이벤트-동작-usb-warning-light" class="section level4"
+number="1.7.3.13">
+<h4><span class="header-section-number">1.7.3.13</span> 6.3.13 이벤트
+동작: USB Warning Light</h4>
+<ul>
+<li>경광등: 사용/깜빡임 속도(1~15)</li>
+<li>부저: 사용/속도/동작시간(1~15)</li>
+<li>팝업 닫을 때 종료</li>
+<li>테스트: 시작/중지</li>
+</ul>
+</div>
+<div id="이벤트-동작-ethernet-warning-light" class="section level4"
+number="1.7.3.14">
+<h4><span class="header-section-number">1.7.3.14</span> 6.3.14 이벤트
+동작: Ethernet Warning Light</h4>
+<ul>
+<li>IP 설정(기본 192.168.10.100)</li>
+<li>경광등: 사용/깜빡임 속도(1~15)</li>
+<li>사운드: 사용/종류(1~5)/동작 시간</li>
+<li>팝업 닫을 때 종료</li>
+<li>테스트: 시작/중지</li>
+</ul>
+</div>
+<div id="이벤트-동작-popup-message" class="section level4"
+number="1.7.3.15">
+<h4><span class="header-section-number">1.7.3.15</span> 6.3.15 이벤트
+동작: Popup Message</h4>
+<ul>
+<li>제목/내용</li>
+<li>자동 닫힘</li>
+</ul>
+</div>
+<div id="이벤트-동작-sms" class="section level4" number="1.7.3.16">
+<h4><span class="header-section-number">1.7.3.16</span> 6.3.16 이벤트
+동작: SMS</h4>
+<ul>
+<li>인터넷 가능 환경 필요, 문자서비스 Open API 연동</li>
+<li>사용자 아이디/발신번호/수신번호(‘-’ 포함 가능, 다수 추가)/추가할
+내용/테스트</li>
+</ul>
+</div>
+<div id="이벤트-동작-flickering" class="section level4"
+number="1.7.3.17">
+<h4><span class="header-section-number">1.7.3.17</span> 6.3.17 이벤트
+동작: Flickering</h4>
+<ul>
+<li>주소(클라이언트)/포트(기본 80)</li>
+<li>카메라 선택</li>
+<li>자동 종료 시간</li>
+</ul>
+</div>
+<div id="이벤트-동작-network-speaker" class="section level4"
+number="1.7.3.18">
+<h4><span class="header-section-number">1.7.3.18</span> 6.3.18 이벤트
+동작: Network Speaker</h4>
+<ul>
+<li>AXIS 네트워크 스피커 지원</li>
+<li>카메라 선택(연계 스피커 음원 방송)</li>
+<li>오디오 클립: 등록된 모든 Network Speaker 음원 목록에서 선택</li>
+</ul>
+</div>
+<div id="이벤트-맵-설정" class="section level4" number="1.7.3.19">
+<h4><span class="header-section-number">1.7.3.19</span> 6.3.19 이벤트 맵
+설정</h4>
+<ul>
+<li>이벤트 맵 이름</li>
+<li>이벤트 입력 이름</li>
+<li>이벤트 동작 이름</li>
+<li><strong>추가</strong>(중복 동작 가능)</li>
+</ul>
+</div>
+</div>
+<div id="사용자-분할-화면-설정" class="section level3" number="1.7.4">
+<h3><span class="header-section-number">1.7.4</span> 6.4 사용자 분할
+화면 설정</h3>
+<ul>
+<li>기본 19종 이외 사용자 정의 분할 화면 제작</li>
+</ul>
+<ol style="list-style-type: decimal">
+<li>리스트 <strong>추가</strong> → <code>new_layout1</code> 생성</li>
+<li>이름 변경</li>
+<li>행/열 선택</li>
+<li>이름 클릭 시 적용</li>
+<li>화면 드래그로 분할 구성</li>
+<li>분할 해제: 우클릭 → <strong>분할 해제</strong></li>
+<li>고해상도 선택(기본 저해상도)</li>
+<li><strong>적용</strong>으로 저장</li>
+</ol>
+<hr />
+</div>
+</div>
+<div id="환경설정" class="section level2" number="1.8">
+<h2><span class="header-section-number">1.8</span> 7. 환경설정</h2>
+<ul>
+<li>우측 상단 설정 버튼</li>
+</ul>
+<div id="환경설정-화면" class="section level3" number="1.8.1">
+<h3><span class="header-section-number">1.8.1</span> 7.1 환경설정
+화면</h3>
+<ul>
+<li>3가지 그룹
+<ol style="list-style-type: decimal">
+<li><strong>시스템 관리</strong>: 계정, 데이터베이스, 언어, 기타<br />
+</li>
+<li><strong>기능 관리</strong>: 단축키, 기타<br />
+</li>
+<li><strong>화면 설정</strong>: 영상, OSD/순차표출</li>
+</ol></li>
+</ul>
+</div>
+<div id="시스템-관리" class="section level3" number="1.8.2">
+<h3><span class="header-section-number">1.8.2</span> 7.2 시스템
+관리</h3>
+<div id="계정" class="section level4" number="1.8.2.1">
+<h4><span class="header-section-number">1.8.2.1</span> 7.2.1 계정</h4>
+<ul>
+<li>사용자 정보/비밀번호 검사/자동 로그아웃</li>
+<li>시작/종료/설정/재생에 대한 비밀번호 입력 정책</li>
+<li>자동 로그아웃(초): 활성화 시 무입력 상태에서 화면 잠금</li>
+<li><strong>통합 인증</strong>: 실행 중인 프로그램의 로그인 정보를
+이용한 자동 로그인
+<ul>
+<li>(Client와 GIS 지원, VAC 추후 지원 예정)</li>
+</ul></li>
+</ul>
+</div>
+<div id="데이터베이스" class="section level4" number="1.8.2.2">
+<h4><span class="header-section-number">1.8.2.2</span> 7.2.2
+데이터베이스</h4>
+<ul>
+<li>MariaDB 설정
+<ul>
+<li>주소: VMS(관리서버 IP) / NVR(NVR IP)</li>
+<li>포트: 기본 <code>3306</code></li>
+<li>아이디 / 비밀번호: 설치 시 설정 값</li>
+</ul></li>
+</ul>
+</div>
+<div id="언어" class="section level4" number="1.8.2.3">
+<h4><span class="header-section-number">1.8.2.3</span> 7.2.3 언어</h4>
+<ul>
+<li>한국어/영어/중국어/일본어/폴란드어</li>
+</ul>
+</div>
+<div id="기타" class="section level4" number="1.8.2.4">
+<h4><span class="header-section-number">1.8.2.4</span> 7.2.4 기타</h4>
+<p><strong>시간 동기화</strong> - 서버와 시간 동기화(기본 사용) - 주소:
+<code>time.kriss.re.kr</code> - 업데이트 / 주기</p>
+<p><strong>조이스틱 사용</strong> - 사용 여부/종류 선택/속도(1~10)</p>
+<p><strong>프로그램 시작 옵션</strong> - 전체화면으로 실행 - 탭 번호
+지정</p>
+</div>
+</div>
+<div id="기능-관리" class="section level3" number="1.8.3">
+<h3><span class="header-section-number">1.8.3</span> 7.3 기능 관리</h3>
+<div id="단축키" class="section level4" number="1.8.3.1">
+<h4><span class="header-section-number">1.8.3.1</span> 7.3.1 단축키</h4>
+<ul>
+<li>명령/단축키 목록</li>
+<li>새 단축키 입력 → <strong>할당</strong></li>
+</ul>
+</div>
+<div id="기타-1" class="section level4" number="1.8.3.2">
+<h4><span class="header-section-number">1.8.3.2</span> 7.3.2 기타</h4>
+<ul>
+<li>스피커/마이크 자동 해제(대기시간 설정)</li>
+<li><strong>즉시 팝업 재생 시간</strong> 설정(1~60분)</li>
+</ul>
+</div>
+</div>
+<div id="화면-설정" class="section level3" number="1.8.4">
+<h3><span class="header-section-number">1.8.4</span> 7.4 화면 설정</h3>
+<div id="영상" class="section level4" number="1.8.4.1">
+<h4><span class="header-section-number">1.8.4.1</span> 7.4.1 영상</h4>
+<ul>
+<li>빠른 스트림 전환 사용(고/저해상도 전송 방식)</li>
+<li>선명하게 하기(고품질, CPU 사용량 고려)</li>
+<li>영상 끊김 시 마지막 영상 유지</li>
+<li>Direct3D 하위버전/하드웨어 코덱(환경에 따라 자동)</li>
+<li>버퍼링 타입: 적응지연(기본)</li>
+</ul>
+</div>
+<div id="osd-순차표출" class="section level4" number="1.8.4.2">
+<h4><span class="header-section-number">1.8.4.2</span> 7.4.2 OSD /
+순차표출</h4>
+<ul>
+<li>글자 크기(기본 16) / 색상(기본 백색)</li>
+<li>배경(테두리) 색상(기본 검정) / 선 두께(기본 1)</li>
+<li>다음 시간 후 <strong>연결 중</strong> 표시(기본 10초)</li>
+<li>전체화면 날짜/시간 표시 위치</li>
+<li><strong>순차표출</strong> 지속 시간(기본 10초)
+<ul>
+<li>주의: 그룹 내 순차표출은 <strong>전체 화면에서는 동작하지
+않음</strong>(분할 이하에서 동작)</li>
+</ul></li>
+</ul>
+<hr />
+</div>
+</div>
+</div>
+<div id="문제-해결-방법faq" class="section level2" number="1.9">
+<h2><span class="header-section-number">1.9</span> 8. 문제 해결
+방법(FAQ)</h2>
+<ul>
+<li>영상이 “연결 중” 상태
+<ol style="list-style-type: decimal">
+<li>라이브 화면에서 해당 카메라 <strong>Ping 테스트</strong></li>
+<li>Ping 불가: 네트워크 문제 가능(관리자 문의)</li>
+<li>Ping 정상: 카메라 설정 문제 가능 → 카메라 웹 페이지에서 설정
+확인</li>
+<li>상태에서 카메라 <strong>사용 안 함(X)</strong> 여부 확인 →
+<strong>사용함</strong>으로 변경</li>
+<li>고해상도/저해상도/녹화에 X 표시: 네트워크 문제 가능(동일 조치)</li>
+</ol></li>
+<li>다수/전체 영상이 접속 중
+<ul>
+<li>모니터링 장소의 네트워크 상태 문제 또는 저장분배서버(NVR/CMS) 문제
+가능 → 담당 업체 문의</li>
+</ul></li>
+</ul>
+</main>
+</div>
+</div>
+
+
+
+</div>
+</div>
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+function bootstrapStylePandocTables() {
+  $('tr.odd').parent('tbody').parent('table').addClass('table table-condensed');
+}
+$(document).ready(function () {
+  bootstrapStylePandocTables();
+});
+
+
+</script>
+
+<!-- tabsets -->
+
+<script>
+$(document).ready(function () {
+  window.buildTabsets("TOC");
+});
+
+$(document).ready(function () {
+  $('.tabset-dropdown > .nav-tabs > li').click(function () {
+    $(this).parent().toggleClass('nav-tabs-open');
+  });
+});
+</script>
+
+<!-- code folding -->
+
+<script>
+$(document).ready(function ()  {
+
+    // temporarily add toc-ignore selector to headers for the consistency with Pandoc
+    $('.unlisted.unnumbered').addClass('toc-ignore')
+
+    // move toc-ignore selectors from section div to header
+    $('div.section.toc-ignore')
+        .removeClass('toc-ignore')
+        .children('h1,h2,h3,h4,h5').addClass('toc-ignore');
+
+    // establish options
+    var options = {
+      selectors: "h1,h2,h3",
+      theme: "bootstrap3",
+      context: '.toc-content',
+      hashGenerator: function (text) {
+        return text.replace(/[.\\/?&!#<>]/g, '').replace(/\s/g, '_');
+      },
+      ignoreSelector: ".toc-ignore",
+      scrollTo: 0
+    };
+    options.showAndHide = true;
+    options.smoothScroll = true;
+
+    // tocify
+    var toc = $("#TOC").tocify(options).data("toc-tocify");
+});
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

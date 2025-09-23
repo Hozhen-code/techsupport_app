@@ -18,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session as OrmSession
 from fastapi.templating import Jinja2Templates
 import io, csv
-from app_manuals import router as manuals_router
+from app_manuals import router as manuals_router, mount_manuals_static
 from auth_utils import require_master, require_tech, require_login
 
 
@@ -37,6 +37,50 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 app = FastAPI()
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+
+    path = request.url.path or ""
+
+    # 1) manuals 정적 HTML에만 좀 더 느슨한 CSP
+    if path.startswith("/manuals_static/"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            # RMD HTML에는 인라인 스크립트가 많음
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
+            # 인라인 스타일, site_libs css 허용
+            "style-src 'self' 'unsafe-inline'; "
+            # 이미지/폰트가 data: 로 들어오는 경우 허용
+            "img-src 'self' data: blob:; "
+            "font-src 'self' data:; "
+            # 같은 출처에서만 프레임 허용 (iframe 보기)
+            "frame-ancestors 'self'; "
+        )
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+
+    # 2) 그 외 기본(조금 더 타이트)
+    else:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            # ▼ CDN을 쓰는 경우 여기 도메인 추가
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; "
+            "img-src 'self' data:; "
+            "font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+            "frame-src 'self'; "
+            "frame-ancestors 'self'; "
+        )
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+
+    # 권장 보안 헤더 몇 개 더
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-XSS-Protection"] = "0"
+    return response
+
+mount_manuals_static(app)
 app.include_router(manuals_router)
 app.add_middleware(
     SessionMiddleware,
@@ -45,7 +89,7 @@ app.add_middleware(
     same_site="lax",
     https_only=False,
 )
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
@@ -493,36 +537,6 @@ def account_password_form(request: Request):
         {"name": "confirm_password", "label": "새 비밀번호 확인", "type": "password", "required": True},
     ]
     return render_form(request, "비밀번호 변경", fields, "/account/password")
-
-# 내 비밀번호 변경 처리
-@app.post("/account/password", response_class=HTMLResponse)
-def account_password_submit(
-    request: Request, db: OrmSession = Depends(get_db),
-    current_password: str = Form(...),
-    new_password: str = Form(...),
-    confirm_password: str = Form(...)
-):
-    require_login(request)
-
-    if new_password != confirm_password:
-        return PlainTextResponse("새 비밀번호 확인이 일치하지 않습니다.", status_code=400)
-    if len(new_password) < 8:
-        return PlainTextResponse("새 비밀번호는 8자 이상이어야 합니다.", status_code=400)
-
-    emp_id = request.session["user"]["emp_id"]
-    auth = db.execute(select(EmployeeAuth).where(EmployeeAuth.emp_id == emp_id)).scalar_one_or_none()
-    if not auth:
-        raise HTTPException(status_code=404, detail="계정 정보를 찾을 수 없습니다.")
-
-    if not verify_and_upgrade_password(db, auth, current_password):
-        return PlainTextResponse("현재 비밀번호가 올바르지 않습니다.", status_code=400)
-
-    auth.pw_hash = hash_password(new_password)
-    auth.pw_salt = None
-    db.commit()
-
-    request.session.clear()
-    return RedirectResponse(url="/login", status_code=HTTP_302_FOUND)
 
 @app.post("/account/password")
 def account_password_submit(
@@ -1092,7 +1106,7 @@ def vendors_list(request: Request, db: OrmSession = Depends(get_db)):
     q = db.query(Vendor).filter(Vendor.deleted_at.is_(None))
     rows = [
         [v.vendor_id, v.name, v.ceo_name or "", v.phone or "", v.email or ""]
-        for v in db.query(Vendor).order_by(Vendor.vendor_id.asc()).all()
+        for v in q.order_by(Vendor.vendor_id.asc()).all()
     ]
 
     headers = [
@@ -1114,6 +1128,7 @@ def vendors_list(request: Request, db: OrmSession = Depends(get_db)):
 
 @app.get("/vendors/new", response_class=HTMLResponse)
 def vendors_new(request: Request):
+
     require_login(request)
     fields=[{"name":"name","label":"업체명","type":"text","required":True},
             {"name":"ceo_name","label":"대표","type":"text"},

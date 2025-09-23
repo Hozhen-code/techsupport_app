@@ -1,39 +1,49 @@
+# app_manuals.py — 매뉴얼(트리/체크/첨부) + RMD→HTML 뷰어 + HTML→PDF 내보내기
+from __future__ import annotations
+
+import io
+import os
+import shutil
+import logging
+import mimetypes
+import secrets
+from pathlib import Path
+from datetime import datetime
+from types import SimpleNamespace
+from typing import List, Optional, Dict, Any
+
 from fastapi import (
-    APIRouter, Depends, Request, UploadFile, File, Form,
-    HTTPException, Query
+    APIRouter, Depends, Request, UploadFile, File, Form, HTTPException, Query
 )
-from fastapi.responses import (
-    HTMLResponse, StreamingResponse, FileResponse, JSONResponse
-)
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
 from sqlalchemy import (
     Column, Integer, String, Text, ForeignKey,
     DateTime, Boolean, func, UniqueConstraint, create_engine
 )
 from sqlalchemy.orm import relationship, Session, declarative_base, sessionmaker
-from typing import List, Optional, Dict, Any
-from pathlib import Path
-from datetime import datetime
+
+# 권한 헬퍼
 from auth_utils import require_master, require_tech, require_login
-from types import SimpleNamespace
-import shutil, io, os, logging, mimetypes, secrets
 
 # ─────────────────────────────────────────────
-# 로깅 설정
+# 로깅/기본 설정
 # ─────────────────────────────────────────────
 logger = logging.getLogger("uvicorn.error")
 
-# ─────────────────────────────────────────────
-# DB 설정
-# ─────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./naiz.db")
+# ▶ DB URL을 app.py와 동일 정책으로 통일
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////app/data/naiz.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
-
 
 def get_db():
     db = SessionLocal()
@@ -42,18 +52,17 @@ def get_db():
     finally:
         db.close()
 
-# ─────────────────────────────────────────────
-# 템플릿 & 라우터
-# ─────────────────────────────────────────────
-templates = Jinja2Templates(directory="templates")
+TEMPLATES_DIR = Path("templates")
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
 router = APIRouter(prefix="/manuals", tags=["manuals"])
 
-# 컨테이너 기준 /app/uploads/manuals 로 생성됨 (상대경로)
+# 매뉴얼 정적 자산 위치 (Rmd 렌더 결과 html, site_libs 등)
 UPLOAD_ROOT = Path(os.getenv("MANUALS_DIR", "uploads/manuals")).resolve()
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
-# 업로드 제약
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "150"))  # 기본 150MB
+# 업로드 정책
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "150"))
 ALLOWED_EXTS = set(
     x.lower() for x in os.getenv(
         "ALLOWED_MANUALS_EXTS",
@@ -62,7 +71,7 @@ ALLOWED_EXTS = set(
 )
 
 # ─────────────────────────────────────────────
-# 모델 정의
+# DB 모델
 # ─────────────────────────────────────────────
 class Version(Base):
     __tablename__ = "versions"
@@ -70,13 +79,11 @@ class Version(Base):
     name = Column(String, unique=True, index=True)
     created_at = Column(DateTime, default=func.now())
 
-
 class Software(Base):
     __tablename__ = "software"
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True, index=True)
     created_at = Column(DateTime, default=func.now())
-
 
 class ManualNode(Base):
     __tablename__ = "manual_nodes"
@@ -86,7 +93,6 @@ class ManualNode(Base):
     sort_order = Column(Integer, default=0)
     is_section = Column(Boolean, default=True)
     parent = relationship("ManualNode", remote_side=[id], backref="children", lazy="joined")
-
 
 class ManualNodeRevision(Base):
     __tablename__ = "manual_node_revisions"
@@ -103,10 +109,7 @@ class ManualNodeRevision(Base):
     software = relationship("Software", lazy="joined")
     version = relationship("Version", lazy="joined")
 
-    __table_args__ = (
-        UniqueConstraint("node_id", "software_id", "version_id", name="uniq_node_sw_ver"),
-    )
-
+    __table_args__ = (UniqueConstraint("node_id", "software_id", "version_id", name="uniq_node_sw_ver"),)
 
 class Attachment(Base):
     __tablename__ = "attachments"
@@ -119,7 +122,6 @@ class Attachment(Base):
     uploaded_at = Column(DateTime, default=func.now())
     revision = relationship("ManualNodeRevision", backref="attachments", lazy="joined")
 
-
 class ChangeLog(Base):
     __tablename__ = "manual_changelog"
     id = Column(Integer, primary_key=True)
@@ -130,13 +132,19 @@ class ChangeLog(Base):
     change_note = Column(Text)
     changed_at = Column(DateTime, default=func.now())
 
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        # 강력 무캐시
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        return resp
 
 Base.metadata.create_all(bind=engine)
 
 # ─────────────────────────────────────────────
-# 권한 헬퍼
+# 권한 dependency
 # ─────────────────────────────────────────────
-
 def current_user_dep(request: Request):
     require_login(request)
     u = request.session.get("user") or {}
@@ -147,44 +155,30 @@ def current_user_dep(request: Request):
         name=u.get("name"),
     )
 
-
 def dep_master(request: Request, user=Depends(current_user_dep)):
     require_master(request)
     return user
-
 
 def dep_tech(request: Request, user=Depends(current_user_dep)):
     require_tech(request)
     return user
 
 # ─────────────────────────────────────────────
-# 페이지
+# 유틸
 # ─────────────────────────────────────────────
+def _secure_under_root(p: Path) -> Path:
+    p = p.resolve()
+    if not str(p).startswith(str(UPLOAD_ROOT)):
+        raise HTTPException(400, detail="invalid path")
+    return p
 
-@router.get("/", response_class=HTMLResponse)
-def manuals_page(request: Request, db: Session = Depends(get_db)):
-    require_login(request)
-    versions = db.query(Version).order_by(Version.created_at.desc()).all()
-    sw = db.query(Software).order_by(Software.name).all()
-    return templates.TemplateResponse(
-        "manuals.html", {"request": request, "versions": versions, "software": sw}
-    )
+def _ext_ok(filename: str) -> bool:
+    _, ext = os.path.splitext(filename.lower())
+    return (ext in ALLOWED_EXTS) if ALLOWED_EXTS else True
 
-
-@router.get("/api/versions")
-def api_versions(db: Session = Depends(get_db)):
-    rows = db.query(Version).all()
-    return [{"id": r.id, "name": r.name} for r in rows]
-
-
-@router.get("/api/software")
-def api_software(db: Session = Depends(get_db)):
-    rows = db.query(Software).all()
-    return [{"id": r.id, "name": r.name} for r in rows]
-
-# ─────────────────────────────────────────────
-# 트리 조회
-# ─────────────────────────────────────────────
+def _guess_mime(filename: str) -> str:
+    mime, _ = mimetypes.guess_type(filename)
+    return mime or "application/octet-stream"
 
 def _tri_state(flags: List[bool]) -> str:
     if not flags:
@@ -195,7 +189,76 @@ def _tri_state(flags: List[bool]) -> str:
         return "partial"
     return "unchecked"
 
+# ─────────────────────────────────────────────
+# 정적 마운트 + 페이지/뷰어
+# ─────────────────────────────────────────────
+def mount_manuals_static(app):
+    app.mount(
+        "/manuals_static",
+        NoCacheStaticFiles(directory=str(UPLOAD_ROOT)),
+        name="manuals_static",
+    )
 
+@router.get("/", response_class=HTMLResponse)
+def manuals_page(request: Request, db: Session = Depends(get_db)):
+    require_login(request)
+    versions = db.query(Version).order_by(Version.created_at.desc()).all()
+    sw = db.query(Software).order_by(Software.name).all()
+    return templates.TemplateResponse(
+        "manuals.html", {"request": request, "versions": versions, "software": sw}
+    )
+
+@router.get("/viewer", response_class=HTMLResponse)
+def viewer_page(request: Request,
+                sw: str = Query(..., description="소프트웨어명"),
+                version: str = Query(..., description="버전")):
+    # /uploads/manuals/<SW>/<VERSION>/index.html 확인
+    html_path = UPLOAD_ROOT / sw / version / "index.html"   # ← MANUALS_DIR 오타 수정
+    if not html_path.exists():
+        raise HTTPException(404, f"HTML not found: {html_path}")
+
+    iframe_src = f"/manuals_static/{sw}/{version}/index.html"
+    html = """
+    {% extends "base.html" %}
+    {% block content %}
+    <div class="container mx-auto px-4 py-4">
+      <div class="flex items-center mb-3 gap-2">
+        <h2 class="text-xl font-semibold">{{ sw }} ({{ version }})</h2>
+        <a class="btn btn-sm" href="/manuals/export/pdf?sw={{ sw }}&version={{ version }}">PDF 내보내기</a>
+      </div>
+      <div class="border rounded shadow bg-white" style="height: calc(100vh - 180px);">
+        <iframe src="{{ iframe_src }}" style="width:100%;height:100%;border:0;" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </div>
+    {% endblock %}
+    """
+    template = templates.env.from_string(html)
+    return HTMLResponse(template.render({"request": request, "sw": sw, "version": version, "iframe_src": iframe_src}))
+
+
+# ─────────────────────────────────────────────
+# 버전/소프트웨어 API
+# ─────────────────────────────────────────────
+@router.get("/api/versions")
+def api_versions(db: Session = Depends(get_db)):
+    rows = db.query(Version).all()
+    return [{"id": r.id, "name": r.name} for r in rows]
+
+@router.get("/api/software")
+def api_software(db: Session = Depends(get_db)):
+    rows = db.query(Software).all()
+    return [{"id": r.id, "name": r.name} for r in rows]
+
+@router.get("/api/html_meta")
+def html_meta(sw: str = Query(...), version: str = Query(...)):
+    p = (UPLOAD_ROOT / sw / version / "index.html")
+    if not p.exists():
+        raise HTTPException(404, "index.html not found")
+    return {"mtime": int(p.stat().st_mtime)}
+
+# ─────────────────────────────────────────────
+# 트리 조회/체크 저장
+# ─────────────────────────────────────────────
 @router.api_route("/api/tree", methods=["GET", "POST"])
 async def api_tree(
     request: Request,
@@ -229,17 +292,16 @@ async def api_tree(
 
     allowed_ids = {r.node_id for r in revs}
 
-    def add_parents(nid):
-        node = db.query(ManualNode).get(nid)
+    def add_parents(nid: int):
+        node = db.get(ManualNode, nid)   # ← 최신 API 사용
         while node and node.parent_id:
             allowed_ids.add(node.parent_id)
             node = node.parent
 
-    for rid in list(allowed_ids):
-        add_parents(rid)
+    for nid in list(allowed_ids):
+        add_parents(nid)
 
     all_nodes = db.query(ManualNode).filter(ManualNode.id.in_(allowed_ids)).all()
-
     checked_map = {r.node_id: bool(r.checked) for r in revs}
 
     match_ids = set()
@@ -286,11 +348,6 @@ async def api_tree(
     tree = [serialize(r) for r in roots]
     return {"tree": tree}
 
-
-# ─────────────────────────────────────────────
-# 체크 저장
-# ─────────────────────────────────────────────
-
 @router.post("/api/check")
 def api_check(
     request: Request,
@@ -311,6 +368,7 @@ def api_check(
 
     queue: List[int] = []
     collect(node_id, queue)
+
     for nid in queue:
         for sw in sw_list:
             rev = db.query(ManualNodeRevision).filter_by(
@@ -328,6 +386,7 @@ def api_check(
             else:
                 rev.checked = checked
                 rev.updated_by = getattr(actor, "id", None)
+
         db.add(
             ChangeLog(
                 node_id=nid,
@@ -337,32 +396,13 @@ def api_check(
                 change_note=f"check={checked}",
             )
         )
+
     db.commit()
     return {"ok": True}
 
-
 # ─────────────────────────────────────────────
-# 파일 업로드/목록/삭제/다운로드
+# 첨부 업로드/목록/삭제/다운로드 (ID 기반만 제공)
 # ─────────────────────────────────────────────
-
-def _secure_under_root(p: Path) -> Path:
-    """UPLOAD_ROOT 하위 경로만 허용 (경로 탈출 차단)."""
-    p = p.resolve()
-    if not str(p).startswith(str(UPLOAD_ROOT)):
-        raise HTTPException(400, detail="invalid path")
-    return p
-
-
-def _ext_ok(filename: str) -> bool:
-    _, ext = os.path.splitext(filename.lower())
-    return (ext in ALLOWED_EXTS) if ALLOWED_EXTS else True
-
-
-def _guess_mime(filename: str) -> str:
-    mime, _ = mimetypes.guess_type(filename)
-    return mime or "application/octet-stream"
-
-
 @router.post("/api/upload")
 def api_upload(
     request: Request,
@@ -377,20 +417,15 @@ def api_upload(
 
     if not file.filename:
         raise HTTPException(400, "filename missing")
-
     if not _ext_ok(file.filename):
         raise HTTPException(400, f"file extension not allowed: {file.filename}")
 
-    # 업로드 크기 제한 검사 (가능한 경우, content-length 사용)
     cl = request.headers.get("content-length")
     if cl and int(cl) > MAX_UPLOAD_MB * 1024 * 1024:
         raise HTTPException(413, f"file too large (>{MAX_UPLOAD_MB}MB)")
 
-    logger.info(
-        f"[UPLOAD] start v={version_id} sw={software_id} node={node_id} name={file.filename}"
-    )
+    logger.info(f"[UPLOAD] v={version_id} sw={software_id} node={node_id} name={file.filename}")
 
-    # 리비전 확보
     rev = (
         db.query(ManualNodeRevision)
         .filter_by(node_id=node_id, software_id=software_id, version_id=version_id)
@@ -398,20 +433,15 @@ def api_upload(
     )
     if not rev:
         rev = ManualNodeRevision(
-            node_id=node_id,
-            software_id=software_id,
-            version_id=version_id,
+            node_id=node_id, software_id=software_id, version_id=version_id,
             updated_by=getattr(actor, "id", None),
         )
         db.add(rev)
         db.flush()
 
-    # 경로 생성 (버전/소프트웨어/노드)
     node_dir = UPLOAD_ROOT / f"v{version_id}_sw{software_id}" / str(node_id)
     node_dir.mkdir(parents=True, exist_ok=True)
 
-    # 동일 파일명 충돌 방지: 기존 유지/덮어쓰기/버전링 중 택1
-    # 여기서는 같은 이름이 있으면 _{shortid} 추가
     dest_name = file.filename
     dest_path = node_dir / dest_name
     if dest_path.exists():
@@ -419,11 +449,8 @@ def api_upload(
         dest_name = f"{stem}_{secrets.token_hex(4)}{ext}"
         dest_path = node_dir / dest_name
 
-    # 저장
-    size = 0
     try:
         with dest_path.open("wb") as f:
-            # shutil.copyfileobj 반환값은 None 일 수 있음 → 실제 파일 크기로 보정
             shutil.copyfileobj(file.file, f)
         size = dest_path.stat().st_size
     except Exception as e:
@@ -431,7 +458,6 @@ def api_upload(
         raise HTTPException(500, f"save failed: {e}")
 
     mime = file.content_type or _guess_mime(dest_name)
-    logger.info(f"[UPLOAD] saved -> {dest_path} ({size} bytes)")
 
     att = Attachment(
         revision_id=rev.id,
@@ -443,8 +469,7 @@ def api_upload(
     db.add(att)
     db.commit()
 
-    return {"ok": True, "attachment_id": att.id, "path": att.stored_path, "size": size}
-
+    return {"ok": True, "attachment_id": att.id, "path": att.stored_path, "size": att.size}
 
 @router.get("/api/attachments")
 def list_attachments(
@@ -479,10 +504,9 @@ def list_attachments(
         for a in rows
     ]
 
-
 @router.delete("/api/attachments/{att_id}")
 def delete_attachment(att_id: int, db: Session = Depends(get_db), _: Any = Depends(dep_tech)):
-    att = db.query(Attachment).get(att_id)
+    att = db.get(Attachment, att_id)
     if not att:
         raise HTTPException(404, "attachment not found")
     try:
@@ -495,14 +519,13 @@ def delete_attachment(att_id: int, db: Session = Depends(get_db), _: Any = Depen
     db.commit()
     return {"ok": True}
 
-
 @router.get("/file_by_id")
 def get_file_by_id(
     att_id: int = Query(...),
     inline: bool = Query(True),
     db: Session = Depends(get_db),
 ):
-    att = db.query(Attachment).get(att_id)
+    att = db.get(Attachment, att_id)
     if not att:
         raise HTTPException(404, "attachment not found")
     p = _secure_under_root(Path(att.stored_path))
@@ -511,80 +534,35 @@ def get_file_by_id(
 
     mime = att.mime or _guess_mime(att.filename)
     disp = "inline" if inline else "attachment"
-    headers = {
-        "Content-Disposition": f"{disp}; filename*=UTF-8''{att.filename}"
-    }
-    return FileResponse(str(p), media_type=mime, filename=att.filename, headers=headers)
-
-
-@router.get("/file")
-def get_uploaded_file(path: str = Query(...), inline: bool = Query(True)):
-    """레거시 호환: 절대경로/상대경로 모두 허용하되, UPLOAD_ROOT 하위만 서비스."""
-    try:
-        p = Path(path)
-        if not p.is_absolute():
-            p = UPLOAD_ROOT / p
-        p = _secure_under_root(p)
-    except Exception:
-        raise HTTPException(400, "invalid path")
-
-    if not p.exists():
-        raise HTTPException(404, "파일 없음")
-
-    mime = _guess_mime(p.name)
-    disp = "inline" if inline else "attachment"
-    headers = {"Content-Disposition": f"{disp}; filename*=UTF-8''{p.name}"}
-    return FileResponse(str(p), media_type=mime, filename=p.name, headers=headers)
-
+    # filename 파라미터를 사용하지 않고, 명시적으로 헤더만 설정해 중복 방지
+    headers = {"Content-Disposition": f"{disp}; filename*=UTF-8''{att.filename}"}
+    return FileResponse(str(p), media_type=mime, headers=headers)
 
 # ─────────────────────────────────────────────
-# PDF 내보내기 (간단 목차 버전)
+# HTML → PDF 내보내기 (RMD 렌더 결과 활용)
 # ─────────────────────────────────────────────
-
-@router.post("/export/pdf")
-def export_pdf(
-    request: Request,
-    version_id: int = Form(...),
-    sw_ids: str = Form(...),
-    cover_title: str = Form("메뉴얼"),
-    db: Session = Depends(get_db),
+@router.get("/export/pdf")
+def export_pdf_from_html(
+    sw: str = Query(..., description="소프트웨어명"),
+    version: str = Query(..., description="버전 문자열"),
 ):
-    require_login(request)
+    """
+    /uploads/manuals/{SW}/{VERSION}/index.html 를 통째로 PDF 변환해서 다운로드.
+    WeasyPrint는 JS 실행이 제한적이므로, 필요 시 wkhtmltopdf/Chromium으로 교체 가능.
+    """
     try:
         from weasyprint import HTML
     except Exception as e:
-        raise HTTPException(500, detail=f"WeasyPrint 미설치/환경오류: {e}")
+        raise HTTPException(500, detail=f"WeasyPrint not available: {e}")
 
-    sw_list = [int(x) for x in sw_ids.split(",") if x]
-    version = db.query(Version).get(version_id)
-    # 체크된 노드 수집
-    revs = (
-        db.query(ManualNodeRevision)
-        .filter(
-            ManualNodeRevision.version_id == version_id,
-            ManualNodeRevision.software_id.in_(sw_list),
-            ManualNodeRevision.checked.is_(True),
-        )
-        .all()
-    )
-    include_ids = {r.node_id for r in revs}
+    html_path = UPLOAD_ROOT / sw / version / "index.html"
+    if not html_path.exists():
+        raise HTTPException(status_code=404, detail=f"HTML not found: {html_path}")
 
-    def flatten(n, acc):
-        acc.append(n)
-        for c in n.children:
-            flatten(c, acc)
+    # 파일 경로를 URL로 넘겨 리소스 상대경로를 그대로 사용
+    src_url = f"file://{html_path}"
+    pdf_bytes = HTML(src_url).write_pdf()
 
-    ordered = []
-    roots = db.query(ManualNode).filter(ManualNode.parent_id.is_(None)).order_by(ManualNode.sort_order, ManualNode.id)
-    for r in roots:
-        flatten(r, ordered)
-    selected = [n for n in ordered if n.id in include_ids]
-
-    cover = f"<h1>{cover_title}</h1><h2>{version.name if version else ''}</h2>"
-    body = "".join(f"<h3>{i+1}. {n.title}</h3>" for i, n in enumerate(selected))
-    html = f"<html><meta charset='utf-8'><body>{cover}{body}</body></html>"
-    pdf = HTML(string=html).write_pdf()
-
-    fname = f"manual_{(version.name if version else 'v')}.pdf"
-    headers = {"Content-Disposition": f"attachment; filename=\"{fname}\""}
-    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf", headers=headers)
+    fname = f"{sw}_{version}.pdf"
+    headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)

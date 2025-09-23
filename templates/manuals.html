@@ -1,290 +1,74 @@
 {% extends "base.html" %}
-{% block title %}메뉴얼{% endblock %}
-
 {% block content %}
-<style>
-  #manuals .layout{display:grid;grid-template-columns:260px 1fr;gap:16px}
-  #manuals .left{background:#f5f7fb;padding:12px;overflow:auto;border-radius:8px}
-  #manuals .right{padding:12px;overflow:auto}
-  #manuals .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:8px}
-  #manuals .tree ul{list-style:none;padding-left:18px}
-  #manuals .node-row{display:flex;align-items:center;gap:6px}
-  #manuals .tri{width:14px;text-align:center;display:inline-block;cursor:pointer}
-  #manuals .pill{display:inline-block;padding:3px 8px;margin:2px;border-radius:12px;background:#e7eefc;cursor:pointer}
-  #manuals .pill.active{background:#d0defc;font-weight:600}
-  #manuals .muted{color:#6b7280;font-size:12px}
-  #manuals .search{width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px}
-  #manuals .sticky-top{position:sticky;top:0;background:#f5f7fb;padding-bottom:8px}
-</style>
+<div class="container mx-auto px-4 py-6">
+  <h2 class="text-lg font-semibold mb-4">메뉴얼</h2>
 
-<div id="manuals" class="container">
-  <h2>메뉴얼</h2>
-
-  <div class="layout">
-    <!-- 왼쪽 패널 -->
-    <aside class="left">
-      <div class="sticky-top">
-        <div style="margin-bottom:8px">
-          <label class="muted">버전</label>
-          <select id="version" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px">
+  <div class="grid grid-cols-12 gap-4">
+    <!-- 좌측 패널 -->
+    <aside class="col-span-12 lg:col-span-3">
+      <div class="bg-white rounded shadow p-3 space-y-4">
+        <!-- 버전 선택 -->
+        <div>
+          <label for="ver-select" class="block text-sm text-gray-600 mb-1">버전</label>
+          <select id="ver-select" class="w-full border rounded px-2 py-1">
             {% for v in versions %}
-              <option value="{{ v.id }}">{{ v.name }}</option>
+              <option value="{{ v.name }}">{{ v.name }}</option>
             {% endfor %}
           </select>
         </div>
 
-        <div style="margin-bottom:8px">
-          <label class="muted">SW (다중선택)</label>
-          <div id="sw-box">
+        <!-- 소프트웨어 목록 -->
+        <div>
+          <div class="text-sm text-gray-600 mb-2">SW</div>
+          <div id="sw-list" class="grid grid-cols-1 gap-2">
             {% for s in software %}
-              <span class="pill" data-id="{{ s.id }}">{{ s.name }}</span>
+            <button
+              type="button"
+              class="sw-btn w-full rounded-xl px-4 py-3 text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 shadow-sm"
+              data-sw="{{ s.name }}">
+              <span class="font-semibold">{{ s.name }}</span>
+            </button>
             {% endfor %}
           </div>
         </div>
-
-        <input id="q" class="search" placeholder="검색(트리에서 일치 항목 펼치기)" />
-        <div class="toolbar" style="margin-top:8px">
-          <button class="btn" id="expand">+ 모두 펼치기</button>
-          <button class="btn" id="collapse">- 모두 접기</button>
-        </div>
       </div>
-
-      <div class="tree" id="tree"></div>
     </aside>
 
-    <!-- 오른쪽 본문 -->
-    <main class="right">
-      <div class="toolbar">
-        <button class="btn btn-primary" id="export">PDF 내보내기</button>
-        <span class="muted">선택 노드 상세/첨부 업로드는 아래에서</span>
+    <!-- 우측 뷰어 -->
+    <section class="col-span-12 lg:col-span-9">
+      <!-- 상단 바 -->
+      <div class="flex items-center gap-3 mb-3">
+        <button id="pdfBtn"
+                type="button"
+                class="bg-blue-600 text-white text-sm rounded px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled>
+          PDF 내보내기
+        </button>
+        <span id="current-label" class="text-gray-500 text-sm"></span>
       </div>
 
-      <div id="detail">
-        <p class="muted">좌측 트리에서 항목을 클릭하면 상세가 여기에 표시됩니다.</p>
-        <div id="detail-inner"></div>
+      <!-- 뷰 영역 -->
+      <div class="bg-white rounded shadow overflow-hidden" style="height: calc(100vh - 220px);">
+        <!-- 초기 플레이스홀더 -->
+        <div id="placeholder"
+             class="w-full h-full flex items-center justify-center text-gray-400 select-none">
+          <div class="text-center">
+            <div class="text-2xl mb-2">왼쪽에서 버전과 SW를 선택하면 내용이 표시됩니다</div>
+            <div class="text-sm">RMD → HTML 로 변환된 <code>index.html</code>을 불러옵니다.</div>
+          </div>
+        </div>
+
+        <!-- 실제 뷰어 -->
+        <div id="viewerWrap" style="display:none; width:100%; height:100%;">
+          <iframe id="manualFrame" title="Manual Viewer"
+                  style="width:100%; height:100%; border:0;"
+                  referrerpolicy="no-referrer"></iframe>
+        </div>
       </div>
-    </main>
+    </section>
   </div>
 </div>
 
-<script>
-(function(){
-  const versionEl = document.getElementById('version');
-  const swBox = document.getElementById('sw-box');
-  const treeEl = document.getElementById('tree');
-  const searchEl = document.getElementById('q');
-  const expandBtn = document.getElementById('expand');
-  const collapseBtn = document.getElementById('collapse');
-  const exportBtn = document.getElementById('export');
-
-  // 펼침 상태 저장용
-  let expandedIds = new Set();
-  let lastTree = [];
-
-  function selectedSW(){
-    return Array.from(swBox.querySelectorAll('.pill.active')).map(p=>p.dataset.id);
-  }
-
-  // pill 토글
-  swBox.addEventListener('click', (e)=>{
-    const t = e.target.closest('.pill'); if(!t) return;
-    t.classList.toggle('active'); loadTree();
-  });
-
-  // 검색/버전 변경
-  searchEl.addEventListener('input', debounce(loadTree, 300));
-  versionEl.addEventListener('change', loadTree);
-
-  // 펼치기/접기
-  expandBtn.addEventListener('click', ()=>{
-    // 현재 트리의 모든 id를 expandedIds에 넣고 DOM도 펼침
-    getAllIds(lastTree).forEach(id=>expandedIds.add(id));
-    treeEl.querySelectorAll('ul').forEach(u=>u.style.display='block');
-    treeEl.querySelectorAll('.tri').forEach(t=>t.textContent = '▾');
-  });
-  collapseBtn.addEventListener('click', ()=>{
-    expandedIds.clear();
-    treeEl.querySelectorAll('ul').forEach(u=>u.style.display='none');
-    treeEl.querySelectorAll('.tri').forEach(t=>t.textContent = '▸');
-  });
-
-  // PDF
-  exportBtn.addEventListener('click', async ()=>{
-    const sw = selectedSW();
-    if(!sw.length){ alert('SW를 선택해주세요'); return; }
-    const fd = new FormData();
-    fd.append('version_id', versionEl.value);
-    fd.append('sw_ids', sw.join(','));
-    fd.append('cover_title', '메뉴얼');
-    const res = await fetch('/manuals/export/pdf', {method:'POST', body: fd});
-    if(!res.ok){ alert('내보내기 실패'); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download='manual.pdf'; a.click();
-    URL.revokeObjectURL(url);
-  });
-
-  // 현재 DOM에서 펼쳐진 li id를 expandedIds에 반영
-  function snapshotExpanded(){
-    treeEl.querySelectorAll('li[data-id] > ul').forEach(ul=>{
-      const id = Number(ul.parentElement.dataset.id);
-      if(ul.style.display !== 'none') expandedIds.add(id);
-      else expandedIds.delete(id);
-    });
-  }
-
-  // 트리 로드
-  async function loadTree(){
-    const sw = selectedSW();
-    const q = searchEl.value || '';
-
-    if(!sw.length){
-      treeEl.innerHTML = '<p class="muted">좌측에서 SW를 하나 이상 선택하세요.</p>';
-      lastTree = [];
-      return;
-    }
-
-    // 리로드 전에 펼침 상태 스냅샷
-    snapshotExpanded();
-
-    const fd = new FormData();
-    fd.append('version_id', versionEl.value);
-    sw.forEach(s => fd.append('sw_ids', s));
-    if(q) fd.append('q', q);
-
-    const res = await fetch('/manuals/api/tree', { method:'POST', body: fd });
-    const data = await res.json();
-    const tree = data.tree || [];
-
-    lastTree = tree;
-    if(!tree.length){
-      treeEl.innerHTML = '<p class="muted">선택한 SW/버전에 등록된 트리가 없습니다.</p>';
-      return;
-    }
-    renderTree(tree);
-  }
-
-  function renderTree(tree){
-    treeEl.innerHTML = '';
-    const ul = document.createElement('ul');
-    treeEl.appendChild(ul);
-    tree.forEach(n => ul.appendChild(renderNode(n)));
-  }
-
-  function renderNode(n){
-    const li = document.createElement('li');
-    li.dataset.id = n.id;
-
-    const row = document.createElement('div');
-    row.className = 'node-row' + (n.highlight ? ' hit' : '');
-
-    const tri = document.createElement('span');
-    tri.className='tri';
-    tri.textContent = (n.children && n.children.length) ? '▸':'';
-
-    const cb = document.createElement('input');
-    cb.type='checkbox';
-    cb.indeterminate = (n.state==='partial');
-    cb.checked = (n.state==='checked');
-
-    const label = document.createElement('span');
-    label.textContent = n.title; label.style.cursor='pointer';
-
-    row.appendChild(tri); row.appendChild(cb); row.appendChild(label);
-    li.appendChild(row);
-
-    const kids = document.createElement('ul');
-    kids.style.display='none';
-    li.appendChild(kids);
-
-    // 펼침 상태 복구
-    if(expandedIds.has(n.id)){
-      kids.style.display = 'block';
-      tri.textContent = (n.children && n.children.length) ? '▾' : '';
-    }
-
-    if(n.children && n.children.length){
-      tri.style.cursor='pointer';
-      tri.addEventListener('click', ()=>{
-        const opened = kids.style.display !== 'none';
-        kids.style.display = opened ? 'none' : 'block';
-        tri.textContent = opened ? '▸' : '▾';
-        if(opened) expandedIds.delete(n.id); else expandedIds.add(n.id);
-      });
-      n.children.forEach(c => kids.appendChild(renderNode(c)));
-    }
-
-    label.addEventListener('click', ()=>showDetail(n));
-
-    cb.addEventListener('change', async ()=>{
-      // 저장 전에 펼침 상태 스냅샷
-      snapshotExpanded();
-
-      const sw = selectedSW();
-      const fd = new FormData();
-      fd.append('version_id', Number(versionEl.value));
-      fd.append('sw_ids', sw.join(','));
-      fd.append('node_id', Number(n.id));
-      fd.append('checked', cb.checked ? '1' : '0');
-
-      const res = await fetch('/manuals/api/check', { method:'POST', body: fd });
-      if(!res.ok){
-        const t = await res.text(); alert('저장 실패\n' + t); return;
-      }
-      loadTree(); // 리로드해도 펼침 상태 유지됨
-    });
-
-    return li;
-  }
-
-  async function showDetail(n){
-    const wrap = document.getElementById('detail-inner');
-    wrap.innerHTML = `
-      <h3>${n.title}</h3>
-      <form id="upform">
-        <div style="margin:8px 0">
-          <label>첨부 업로드(PDF/Word/이미지)</label>
-          <input type="file" name="file" />
-        </div>
-        <div style="display:flex;gap:8px">
-          <select name="software_id" id="softSel"></select>
-          <button class="btn">업로드</button>
-        </div>
-      </form>
-    `;
-    const softSel = wrap.querySelector('#softSel');
-    for(const s of selectedSW()){
-      const pill = document.querySelector(`.pill[data-id="${String(s)}"]`);
-      opt.value = String(s);
-      opt.textContent = pill ? pill.textContent.trim() : String(s);
-      softSel.appendChild(opt);
-    }
-    wrap.querySelector('#upform').addEventListener('submit', async (e)=>{
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      fd.append('version_id', versionEl.value);
-      fd.append('node_id', n.id);
-      const res = await fetch('/manuals/api/upload', {method:'POST', body: fd});
-      if(!res.ok){ alert('업로드 실패'); return; }
-      alert('업로드 완료');
-    });
-  }
-
-  function debounce(fn,ms){let t; return (...a)=>{clearTimeout(t); t=setTimeout(()=>fn(...a),ms);} }
-  function getAllIds(tree, acc=[]){
-    for(const n of (tree||[])){ acc.push(n.id); getAllIds(n.children, acc); }
-    return acc;
-  }
-
-  // 기본으로 Leopard_Client 하나만 선택
-  (function primeSW(){
-    const pills = Array.from(swBox.querySelectorAll('.pill'));
-    const client = pills.find(p=>p.textContent.trim()==='Leopard_Client');
-    if(client){ client.classList.add('active'); }
-    else if(pills[0]){ pills[0].classList.add('active'); }
-  })();
-
-  loadTree();
-})();
-</script>
+<!-- 페이지 전용 스크립트 -->
+<script src="/static/manuals.js?v=2"></script>
 {% endblock %}
