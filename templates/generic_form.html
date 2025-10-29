@@ -27,12 +27,10 @@
 <div class="card">
   <div class="card-body">
     {% if request.session.get('user') %}
-  {% endif %}
+    {% endif %}
 
-  <form method="{{ method|default('post') }}" action="{{ action }}" enctype="application/x-www-form-urlencoded">
-
+    <!-- ✅ 단일 form 만 유지 -->
     <form method="{{ method|default('post') }}" action="{{ action }}" enctype="application/x-www-form-urlencoded">
-
       {% for f in fields %}
       <div class="mb-2">
         {% if f.label %}<label for="{{ f.name }}">{{ f.label }}</label>{% endif %}
@@ -252,9 +250,12 @@
       Array.from(sel.options).forEach(function(o){ o.selected = (o.value == val); });
       input.value = label || '';
       list.hidden = true;
+
+      /* ✅ 선택 즉시 숨김 select의 change 이벤트 발생 → 연계 로직(아래 (3))을 확실히 트리거 */
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    // 초기 표시 라벨을 select 선택값과 동기화
+    /* 초기 표시 라벨을 select 선택값과 동기화 */
     var selOpt = sel.querySelector('option:checked');
     if(selOpt) input.value = selOpt.textContent || '';
 
@@ -269,7 +270,7 @@
       });
     });
 
-    // 키보드 네비 (↓/↑/Enter)
+    /* 키보드 네비 (↓/↑/Enter) */
     var idx = -1;
     input.addEventListener('keydown', function(e){
       if(list.hidden) return;
@@ -285,6 +286,36 @@
       }
     });
   });
+})();
+
+/* === (3) CS요청 → '요청 요약' 자동 덮어쓰기 ===============================
+   요구사항:
+   - 새 칸 만들지 말고, request_content 만 사용
+   - 요청ID 변경 시 기존 요약을 지우고 새 내용으로 덮어쓰기
+*/
+(function(){
+  var mapEl = document.getElementById('cs_request_map_json');  // 숨김 textarea
+  var sel   = document.getElementById('request_id');          // 요청ID select
+  var ta    = document.getElementById('request_content');     // 요청 요약 textarea
+  if(!mapEl || !sel || !ta) return;
+
+  var reqMap = {};
+  try { reqMap = JSON.parse(mapEl.value || "{}"); } catch(e){ reqMap = {}; }
+
+  function overwriteFromRequestId(){
+    var v = sel.value || "";
+    var txt = (reqMap[v] || "").trim();
+    /* ✅ 항상 덮어쓰기: 기존 값 초기화 후 새 값 대입 */
+    ta.value = txt;
+  }
+
+  /* 최초 진입: 사용자가 이미 타이핑한 경우 보존, 비어 있으면 1회 채움 */
+  if(!ta.value || ta.value.trim() === ""){
+    overwriteFromRequestId();
+  }
+
+  /* 요청ID 변경 시: 항상 덮어쓰기 */
+  sel.addEventListener('change', overwriteFromRequestId);
 })();
 </script>
 {% endblock %}

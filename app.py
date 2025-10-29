@@ -217,6 +217,68 @@ def active_only(q, Model):
     if hasattr(Model, "deleted_at"):
         return q.filter(getattr(Model, "deleted_at").is_(None))
     return q
+
+def build_cs_request_options_and_map(db: OrmSession, current_id: int | None = None):
+    q = db.query(CSRequest)
+
+    # 동적으로 "삭제" 의미의 컬럼을 감지해서 필터링
+    conditions = []
+
+    # 불리언 플래그 계열
+    if hasattr(CSRequest, 'is_deleted'):
+        conditions.append(CSRequest.is_deleted == False)
+    if hasattr(CSRequest, 'deleted'):
+        conditions.append(CSRequest.deleted == False)
+
+    # 타임스탬프 계열 (None 또는 빈문자면 살아있는 것으로 간주)
+    if hasattr(CSRequest, 'deleted_at'):
+        conditions.append(or_(CSRequest.deleted_at == None, CSRequest.deleted_at == ""))
+
+    # 상태값 계열
+    if hasattr(CSRequest, 'status'):
+        try:
+            conditions.append(CSRequest.status != 'deleted')
+        except Exception:
+            pass
+
+    if conditions:
+        q = q.filter(and_(*conditions))
+
+    # 최신 우선
+    active_reqs = q.order_by(CSRequest.request_id.desc()).all()
+
+    # 셀렉트 옵션 + 자동채움 맵
+    options = [(None, "")]
+    req_map = {}
+    for r in active_reqs:
+        site_name = "-"
+        try:
+            site_name = r.site.name if getattr(r, "site", None) else "-"
+        except Exception:
+            pass
+        title = f"[{r.request_id}] {r.requester_name or '-'} · {site_name}"
+        options.append((r.request_id, title))
+        req_map[str(r.request_id)] = (r.content or "").strip()
+
+    # 수정화면: 현재 연결된 요청이 삭제된 경우에도 1개만 표시(라벨에 '(삭제됨)')
+    if current_id:
+        id_str = str(current_id)
+        if id_str not in req_map:
+            r = db.get(CSRequest, current_id)
+            if r:
+                site_name = "-"
+                try:
+                    site_name = r.site.name if getattr(r, "site", None) else "-"
+                except Exception:
+                    pass
+                deleted_label = f"[{r.request_id}] {r.requester_name or '-'} · {site_name} (삭제됨)"
+                # 옵션 맨 위에 추가해서 사용자가 보긴 하되 선택 상태 유지
+                options.insert(1, (r.request_id, deleted_label))
+                # 자동채움도 동작하도록 맵에 포함
+                req_map[id_str] = (getattr(r, "content", "") or "").strip()
+
+    return options, req_map
+
 # ------------------------------------------------------------------------------
 #// 권한 헬퍼
 # ------------------------------------------------------------------------------
@@ -1283,16 +1345,28 @@ def site_locations_list(request: Request, db: OrmSession = Depends(get_db), site
     })
 
 
+# --- 상세현장: 새로 만들기 폼 ---------------------------------------------------
 @app.get("/site_locations/new", response_class=HTMLResponse)
 def site_locations_new(request: Request, db: OrmSession = Depends(get_db), site_id: Optional[int] = None):
     require_login(request); require_master(request)
-    fields=[{"name":"site_id","label":"현장","type":"select","options":[(None,"")] + options_sites(db),"value":site_id or ""},
-            {"name":"name","label":"이름","type":"text","required":True},
-            {"name":"address","label":"주소","type":"text"},
-            {"name":"manager_name","label":"담당자","type":"text"},
-            {"name":"manager_phone","label":"연락처","type":"text"},
-            {"name":"note","label":"비고","type":"textarea"}]
-    return render_form(request,"상세현장 추가",fields,"/site_locations/new")
+    fields = [
+        {
+            "name": "site_id",
+            "label": "현장",
+            "type": "select",
+            "search_inline": True,                 # ← 검색 가능한 콤보박스(한 칸)
+            "search_placeholder": "현장명 검색…",
+            "options": [(None, "")] + options_sites(db),
+            "value": site_id or "",
+            "required": True                       # ← 필수 선택
+        },
+        {"name": "name", "label": "이름", "type": "text", "required": True},
+        {"name": "address", "label": "주소", "type": "text"},
+        {"name": "manager_name", "label": "담당자", "type": "text"},
+        {"name": "manager_phone", "label": "연락처", "type": "text"},
+        {"name": "note", "label": "비고", "type": "textarea"},
+    ]
+    return render_form(request, "상세현장 추가", fields, "/site_locations/new")
 
 @app.post("/site_locations/new")
 def site_locations_new_submit(request: Request, db: OrmSession = Depends(get_db),
@@ -1303,17 +1377,29 @@ def site_locations_new_submit(request: Request, db: OrmSession = Depends(get_db)
     db.add(SiteLocation(site_id=site_id, name=name.strip(), address=address, manager_name=manager_name, manager_phone=manager_phone, note=note)); db.commit()
     return RedirectResponse(url="/site_locations", status_code=HTTP_302_FOUND)
 
+# --- 상세현장: 수정 폼 -----------------------------------------------------------
 @app.get("/site_locations/edit/{lid}", response_class=HTMLResponse)
 def site_locations_edit(request: Request, lid: int, db: OrmSession = Depends(get_db)):
     require_login(request); require_master(request)
-    l = db.get(SiteLocation, lid); assert l
-    fields=[{"name":"site_id","label":"현장","type":"select","options":[(None,"")] + options_sites(db),"value":l.site_id},
-            {"name":"name","label":"이름","type":"text","required":True,"value":l.name},
-            {"name":"address","label":"주소","type":"text","value":l.address or ""},
-            {"name":"manager_name","label":"담당자","type":"text","value":l.manager_name or ""},
-            {"name":"manager_phone","label":"연락처","type":"text","value":l.manager_phone or ""},
-            {"name":"note","label":"비고","type":"textarea","value":l.note or ""}]
-    return render_form(request,"상세현장 수정",fields,f"/site_locations/edit/{lid}")
+    l = db.get(SiteLocation, lid);  assert l
+    fields = [
+        {
+            "name": "site_id",
+            "label": "현장",
+            "type": "select",
+            "search_inline": True,                 # ← 검색 가능한 콤보박스(한 칸)
+            "search_placeholder": "현장명 검색…",
+            "options": [(None, "")] + options_sites(db),
+            "value": l.site_id,
+            "required": True
+        },
+        {"name": "name", "label": "이름", "type": "text", "required": True, "value": l.name},
+        {"name": "address", "label": "주소", "type": "text", "value": l.address or ""},
+        {"name": "manager_name", "label": "담당자", "type": "text", "value": l.manager_name or ""},
+        {"name": "manager_phone", "label": "연락처", "type": "text", "value": l.manager_phone or ""},
+        {"name": "note", "label": "비고", "type": "textarea", "value": l.note or ""},
+    ]
+    return render_form(request, "상세현장 수정", fields, f"/site_locations/edit/{lid}")
 
 @app.post("/site_locations/edit/{lid}")
 def site_locations_edit_submit(request: Request, lid: int, db: OrmSession = Depends(get_db),
@@ -1659,20 +1745,67 @@ def cs_schedules_export_csv(request: Request, db: OrmSession = Depends(get_db), 
 @app.get("/cs_schedules/new", response_class=HTMLResponse)
 def cs_schedules_new(request: Request, db: OrmSession = Depends(get_db)):
     require_login(request); require_tech(request)
-    fields=[{"name":"request_id","label":"요청ID","type":"select","search_inline": True,
-             "options":[(None,"")] + [(r.request_id, f"{r.request_id}: {r.requester_name}") for r in db.query(CSRequest).order_by(CSRequest.request_id.desc()).all()],"nullable":True},
-            {"name":"site_id","label":"현장","type":"select","search_inline": True,"options":[(None,"")] + options_sites(db),"nullable":True},
-            {"name":"start_date","label":"시작일","type":"date","required":True,"value":date.today().isoformat()},
-            {"name":"end_date","label":"종료일","type":"date"},
-            {"name":"request_content","label":"요청 요약","type":"textarea"},
-            {"name":"work_content","label":"작업 내용","type":"textarea"},
-            {"name":"extra_content","label":"추가 내용","type":"textarea"},
-            {"name":"status","label":"상태","type":"select","options":[("todo","todo"),("in_progress","in_progress"),("done","done"),("lab_request","lab_request")]},
-            {"name":"note","label":"비고","type":"textarea"},
-            {"name":"color","label":"표시 색상","type":"color","value":"#3b82f6"},
-            {"name":"locations","label":"상세현장(복수)","type":"multiselect","options":options_site_locations(db)},
-            {"name":"assignees","label":"담당자(복수)","type":"multiselect","options":options_employees(db)}]
-    return render_form(request,"CS 일정 등록",fields,"/cs_schedules/new")
+
+    # 요청 목록(최근 → 과거) 옵션 + 자동채움용 맵
+    reqs = db.query(CSRequest).order_by(CSRequest.request_id.desc()).all()
+    req_options = [(None, "")]
+    req_map = {}
+    for r in reqs:
+        title = f"[{r.request_id}] {r.requester_name or '-'} · {r.site.name if getattr(r, 'site', None) else '-'}"
+        req_options.append((r.request_id, title))
+        req_map[str(r.request_id)] = (r.content or "").strip()
+
+    fields = [
+        # ▼ CS요청 ID(선택하면 '요청 요약'에 자동 덮어쓰기)
+        {
+            "name": "request_id",
+            "label": "요청ID",
+            "type": "select",
+            "search_inline": True,
+            "search_placeholder": "요청ID/요청자/현장 검색…",
+            "options": req_options,
+            "nullable": True
+        },
+
+        # ▼ 현장
+        {
+            "name": "site_id",
+            "label": "현장",
+            "type": "select",
+            "search_inline": True,
+            "options": [(None, "")] + options_sites(db),
+            "nullable": True
+        },
+
+        {"name": "start_date", "label": "시작일", "type": "date", "required": True, "value": date.today().isoformat()},
+        {"name": "end_date",   "label": "종료일", "type": "date"},
+
+        # ▼ '요청 요약' — 여기에만 자동 기입 (새 칸 만들지 않음)
+        {"name": "request_content", "label": "요청 요약", "type": "textarea"},
+
+        {"name": "work_content",    "label": "작업 내용", "type": "textarea"},
+        {"name": "extra_content",   "label": "추가 내용", "type": "textarea"},
+        {
+            "name": "status", "label": "상태", "type": "select",
+            "options": [("todo","todo"), ("in_progress","in_progress"), ("done","done"), ("lab_request","lab_request")]
+        },
+        {"name": "note",  "label": "비고", "type": "textarea"},
+        {"name": "color", "label": "표시 색상", "type": "color", "value": "#3b82f6"},
+        {"name": "locations", "label": "상세현장(복수)", "type": "multiselect", "options": options_site_locations(db)},
+        {"name": "assignees", "label": "담당자(복수)", "type": "multiselect", "options": options_employees(db)},
+
+        # ▼ 자동 채움용 숨김 JSON(보이지 않음, 새 필드 아님)
+        {
+            "name": "cs_request_map_json",
+            "label": "", 
+            "type": "textarea",
+            "value": json.dumps(req_map, ensure_ascii=False),
+            "class": "hidden",
+            "attrs": {"style": "display:none !important;"},
+        },
+    ]
+
+    return render_form(request, "CS 일정 등록", fields, "/cs_schedules/new")
 
 @app.post("/cs_schedules/new")
 def cs_schedules_new_submit(
@@ -1736,22 +1869,68 @@ def cs_schedules_new_submit(
 @app.get("/cs_schedules/edit/{sid}", response_class=HTMLResponse)
 def cs_schedules_edit(request: Request, sid: int, db: OrmSession = Depends(get_db)):
     require_login(request); require_tech(request)
-    s = db.get(CSSchedule, sid); assert s
+    s = db.get(CSSchedule, sid);  assert s
+
+    # 요청 목록 + 자동채움용 맵
+    reqs = db.query(CSRequest).order_by(CSRequest.request_id.desc()).all()
+    req_options = [(None, "")]
+    req_map = {}
+    for r in reqs:
+        title = f"[{r.request_id}] {r.requester_name or '-'} · {r.site.name if getattr(r, 'site', None) else '-'}"
+        req_options.append((r.request_id, title))
+        req_map[str(r.request_id)] = (r.content or "").strip()
+
     cur_locs = [sl.location_id for sl in s.sch_locations]
     cur_emps = [sa.emp_id for sa in s.sch_assignees]
-    fields=[{"name":"request_id","label":"요청ID","type":"select","search_inline": True,"options":[(None,"")] + [(r.request_id, f"{r.request_id}: {r.requester_name}") for r in db.query(CSRequest).order_by(CSRequest.request_id.desc()).all()],"value":s.request_id or ""},
-            {"name":"site_id","label":"현장","type":"select","search_inline": True,"options":[(None,"")] + options_sites(db),"value":s.site_id or ""},
-            {"name":"start_date","label":"시작일","type":"date","required":True,"value":s.start_date},
-            {"name":"end_date","label":"종료일","type":"date","value":s.end_date or ""},
-            {"name":"request_content","label":"요청 요약","type":"textarea","value":s.request_content or ""},
-            {"name":"work_content","label":"작업 내용","type":"textarea","value":s.work_content or ""},
-            {"name":"extra_content","label":"추가 내용","type":"textarea","value":s.extra_content or ""},
-            {"name":"status","label":"상태","type":"select","options":[("todo","todo"),("in_progress","in_progress"),("done","done"),("lab_request","lab_request")],"value":s.status},
-            {"name":"note","label":"비고","type":"textarea","value":s.note or ""},
-            {"name":"color","label":"표시 색상","type":"color","value": s.color or default_color(s.status)},
-            {"name":"locations","label":"상세현장(복수)","type":"multiselect","options":options_site_locations(db),"value":cur_locs},
-            {"name":"assignees","label":"담당자(복수)","type":"multiselect","options":options_employees(db),"value":cur_emps}]
-    return render_form(request,"CS 일정 수정",fields,f"/cs_schedules/edit/{sid}")
+
+    fields = [
+        {
+            "name": "request_id",
+            "label": "요청ID",
+            "type": "select",
+            "search_inline": True,
+            "search_placeholder": "요청ID/요청자/현장 검색…",
+            "options": req_options,
+            "value": s.request_id or ""
+        },
+        {
+            "name": "site_id",
+            "label": "현장",
+            "type": "select",
+            "search_inline": True,
+            "options": [(None, "")] + options_sites(db),
+            "value": s.site_id or ""
+        },
+        {"name": "start_date", "label": "시작일", "type": "date", "required": True, "value": s.start_date},
+        {"name": "end_date",   "label": "종료일", "type": "date", "value": s.end_date or ""},
+
+        # ▼ '요청 요약' — 수정 화면에서도 이 칸만 사용
+        {"name": "request_content", "label": "요청 요약", "type": "textarea", "value": (s.request_content or "")},
+
+        {"name": "work_content",    "label": "작업 내용", "type": "textarea", "value": (s.work_content or "")},
+        {"name": "extra_content",   "label": "추가 내용", "type": "textarea", "value": (s.extra_content or "")},
+        {
+            "name": "status", "label": "상태", "type": "select",
+            "options": [("todo","todo"), ("in_progress","in_progress"), ("done","done"), ("lab_request","lab_request")],
+            "value": s.status or "todo"
+        },
+        {"name": "note",  "label": "비고", "type": "textarea", "value": (s.note or "")},
+        {"name": "color", "label": "표시 색상", "type": "color", "value": s.color or "#3b82f6"},
+        {"name": "locations", "label": "상세현장(복수)", "type": "multiselect",
+         "options": options_site_locations(db), "value": cur_locs},
+        {"name": "assignees", "label": "담당자(복수)", "type": "multiselect",
+         "options": options_employees(db), "value": cur_emps},
+
+        # ▼ 자동 채움용 숨김 JSON(보이지 않음, 새 필드 아님)
+        {
+            "name": "cs_request_map_json", "label": "", "type": "textarea",
+            "value": json.dumps(req_map, ensure_ascii=False),
+            "class": "",
+            "attrs": {"style": "display:none"},
+        },
+    ]
+
+    return render_form(request, "CS 일정 수정", fields, f"/cs_schedules/edit/{sid}")
 
 @app.post("/cs_schedules/edit/{sid}")
 def cs_schedules_edit_submit(
